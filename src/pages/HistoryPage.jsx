@@ -12,23 +12,27 @@ const SORT_OPTIONS = [
   { value: 'highest-profit', label: 'Highest profit' },
 ];
 
-function formatTimeRemaining(timestamp, endsIn) {
-  const endTime = timestamp + (endsIn * 1000);
-  const now = Date.now();
-  const remaining = Math.max(0, endTime - now);
+function formatTimeRemaining(expirationTime) {
+  // expirationTime is a Unix timestamp in seconds from DFlow
+  if (!expirationTime) return 'Unknown';
+
+  const now = Math.floor(Date.now() / 1000);
+  const remaining = Math.max(0, expirationTime - now);
 
   if (remaining === 0) return 'Resolving...';
 
-  const seconds = Math.floor(remaining / 1000);
-  const minutes = Math.floor(seconds / 60);
+  const minutes = Math.floor(remaining / 60);
   const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
 
-  if (hours > 0) {
+  if (days > 0) {
+    return `Resolves in ${days}d ${hours % 24}h`;
+  } else if (hours > 0) {
     return `Resolves in ${hours}h ${minutes % 60}m`;
   } else if (minutes > 0) {
-    return `Resolves in ${minutes}m ${seconds % 60}s`;
+    return `Resolves in ${minutes}m`;
   } else {
-    return `Resolves in ${seconds}s`;
+    return `Resolves in ${remaining}s`;
   }
 }
 
@@ -37,12 +41,13 @@ function OpenPositionCard({ bet, colors }) {
 
   useEffect(() => {
     const updateTime = () => {
-      setTimeDisplay(formatTimeRemaining(bet.timestamp, bet.market.endsIn));
+      // Use expirationTime from market (Unix timestamp in seconds)
+      setTimeDisplay(formatTimeRemaining(bet.market.expirationTime));
     };
     updateTime();
-    const interval = setInterval(updateTime, 1000);
+    const interval = setInterval(updateTime, 60000); // Update every minute instead of every second
     return () => clearInterval(interval);
-  }, [bet.timestamp, bet.market.endsIn]);
+  }, [bet.market.expirationTime]);
 
   return (
     <motion.div

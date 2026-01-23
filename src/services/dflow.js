@@ -203,8 +203,8 @@ export function transformMarket(market, eventImages = new Map()) {
   const yesProfit = yesAsk > 0 ? (1 / yesAsk) - 1 : 1;
   const noProfit = noAsk > 0 ? (1 / noAsk) - 1 : 1;
 
-  // Extract category from the ticker or use a default
-  const category = getCategoryFromTicker(market.ticker);
+  // Extract category from market (checks both ticker and title)
+  const category = getCategoryFromMarket(market);
 
   // Get image: first try event imageUrl, then event image from map, then keyword matching
   let image = market.imageUrl || eventImages.get(market.eventTicker);
@@ -253,22 +253,85 @@ export function transformMarket(market, eventImages = new Map()) {
  * @param {string} ticker - Market ticker
  * @returns {string} Category name
  */
-function getCategoryFromTicker(ticker) {
-  if (!ticker) return 'Other';
+function getCategoryFromMarket(market) {
+  const ticker = (market.ticker || '').toUpperCase();
+  const title = (market.title || '').toLowerCase();
 
-  const tickerUpper = ticker.toUpperCase();
+  // Crypto - check both ticker and title
+  if (ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL') || ticker.includes('CRYPTO')) return 'Crypto';
+  if (title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana') || title.includes('crypto')) return 'Crypto';
 
-  if (tickerUpper.includes('NFL') || tickerUpper.includes('KXSB')) return 'Sports';
-  if (tickerUpper.includes('NBA')) return 'Sports';
-  if (tickerUpper.includes('NCAA')) return 'Sports';
-  if (tickerUpper.includes('FED') || tickerUpper.includes('RATE')) return 'Finance';
-  if (tickerUpper.includes('PRES') || tickerUpper.includes('GOV') || tickerUpper.includes('MAYOR')) return 'Politics';
-  if (tickerUpper.includes('BTC') || tickerUpper.includes('ETH') || tickerUpper.includes('CRYPTO')) return 'Crypto';
-  if (tickerUpper.includes('BOXING') || tickerUpper.includes('UFC') || tickerUpper.includes('MMA')) return 'Sports';
-  if (tickerUpper.includes('TIME') || tickerUpper.includes('GOOGLE')) return 'Culture';
-  if (tickerUpper.includes('LLM') || tickerUpper.includes('AI')) return 'Tech';
+  // Sports
+  if (ticker.includes('NFL') || ticker.includes('KXSB')) return 'Sports';
+  if (ticker.includes('NBA') || ticker.includes('WNBA')) return 'Sports';
+  if (ticker.includes('NCAA') || ticker.includes('MLB')) return 'Sports';
+  if (ticker.includes('BOXING') || ticker.includes('UFC') || ticker.includes('MMA')) return 'Sports';
+  if (title.includes('basketball') || title.includes('football') || title.includes('baseball')) return 'Sports';
+  if (title.includes('tennis') || title.includes('boxing') || title.includes('ufc')) return 'Sports';
+
+  // Finance
+  if (ticker.includes('FED') || ticker.includes('RATE')) return 'Finance';
+  if (title.includes('federal reserve') || title.includes('interest rate') || title.includes('rate cut') || title.includes('rate hike')) return 'Finance';
+
+  // Politics
+  if (ticker.includes('PRES') || ticker.includes('GOV') || ticker.includes('MAYOR')) return 'Politics';
+  if (title.includes('president') || title.includes('election') || title.includes('democrat') || title.includes('republican')) return 'Politics';
+  if (title.includes('senate') || title.includes('house') || title.includes('congress') || title.includes('governor')) return 'Politics';
+
+  // Tech
+  if (ticker.includes('LLM') || ticker.includes('AI')) return 'Tech';
+  if (title.includes('ai ') || title.includes('artificial intelligence') || title.includes('chatgpt') || title.includes('openai')) return 'Tech';
+
+  // Culture
+  if (ticker.includes('TIME') || ticker.includes('GOOGLE')) return 'Culture';
+  if (title.includes('gta') || title.includes('game') || title.includes('movie') || title.includes('spotify')) return 'Culture';
 
   return 'Other';
+}
+
+/**
+ * Interleave markets so the same category NEVER appears consecutively
+ * @param {Array} markets - Array of market objects with category field
+ * @returns {Array} Interleaved array of markets
+ */
+function interleaveByCategory(markets) {
+  if (markets.length <= 1) return markets;
+
+  // Group markets by category
+  const byCategory = {};
+  for (const market of markets) {
+    const cat = market.category || 'Other';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(market);
+  }
+
+  const result = [];
+  let lastCategory = null;
+
+  // Keep picking markets, always from a different category than the last one
+  while (Object.values(byCategory).some(arr => arr.length > 0)) {
+    // Get categories that still have markets and are different from last
+    const availableCategories = Object.keys(byCategory).filter(
+      cat => byCategory[cat].length > 0 && cat !== lastCategory
+    );
+
+    let chosenCategory;
+
+    if (availableCategories.length > 0) {
+      // Pick from available categories (round-robin style, prioritize those with most markets)
+      availableCategories.sort((a, b) => byCategory[b].length - byCategory[a].length);
+      chosenCategory = availableCategories[0];
+    } else {
+      // Only one category left with markets - have to use it
+      chosenCategory = Object.keys(byCategory).find(cat => byCategory[cat].length > 0);
+      if (!chosenCategory) break;
+    }
+
+    result.push(byCategory[chosenCategory].shift());
+    lastCategory = chosenCategory;
+  }
+
+  return result;
 }
 
 /**
@@ -295,65 +358,60 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
     // Must be active
     if (m.status !== 'active') return false;
 
-    const title = (m.title || '').toLowerCase();
-    const eventTitle = (m.eventTitle || '').toLowerCase();
-    const ticker = (m.ticker || '').toUpperCase();
+    // Binary filter: title must start with "Will" (YES/NO question)
+    const title = (m.title || '').toLowerCase().trim();
+    if (!title.startsWith('will ')) return false;
 
-    // EXCLUDE multi-outcome markets (not binary)
-    if (eventTitle.includes('who will win')) return false;
-    if (eventTitle.includes('who will be')) return false;
-    if (eventTitle.includes('which team')) return false;
-    if (eventTitle.includes('which player')) return false;
-    if (eventTitle.includes('winner of')) return false;
-    if (eventTitle.includes('who wins')) return false;
-    if (title.includes('winner of')) return false;
-    if (title.includes('who will win')) return false;
-    if (title.includes('who wins')) return false;
-
-    // Exclude sports where draw is possible (soccer/football matches)
-    if (eventTitle.includes('soccer') && !title.includes('will ')) return false;
-    if (eventTitle.includes('premier league') && !title.includes('will ')) return false;
-    if (eventTitle.includes('champions league') && !title.includes('will ')) return false;
-    if (eventTitle.includes('world cup') && !title.includes('will ')) return false;
-
-    // INCLUDE: Crypto price predictions (binary by nature - above/below threshold)
-    if (ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL')) return true;
-    if (title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana')) return true;
-    if (title.includes(' above ') || title.includes(' below ')) return true;
-    if (title.includes(' over ') || title.includes(' under ')) return true;
-
-    // INCLUDE: Sports without draws (basketball, tennis, baseball, boxing, MMA/UFC)
-    if (ticker.includes('NBA') || ticker.includes('WNBA')) return true;
-    if (ticker.includes('NFL')) return true;
-    if (ticker.includes('MLB')) return true;
-    if (ticker.includes('UFC') || ticker.includes('MMA') || ticker.includes('BOXING')) return true;
-    if (eventTitle.includes('basketball')) return true;
-    if (eventTitle.includes('tennis')) return true;
-    if (eventTitle.includes('baseball')) return true;
-    if (eventTitle.includes('boxing') || eventTitle.includes('ufc') || eventTitle.includes('mma')) return true;
-
-    // INCLUDE: Clear YES/NO question format
-    if (title.startsWith('will ')) return true;
-    if (title.startsWith('is ')) return true;
-    if (title.startsWith('does ')) return true;
-    if (title.startsWith('can ')) return true;
-    if (title.includes(' at least ') || title.includes(' more than ') || title.includes(' less than ')) return true;
-
-    // Default: exclude unclear markets
-    return false;
+    return true;
   });
 
   console.log('[DFlow] Valid binary markets:', validMarkets.length);
 
-  // Sort by expiration (soonest first)
-  validMarkets.sort((a, b) => {
-    const expA = a.expirationTime || Infinity;
-    const expB = b.expirationTime || Infinity;
-    return expA - expB;
-  });
+  // Transform ALL valid markets first (so we can categorize them)
+  const allTransformed = validMarkets.map(m => transformMarket(m));
 
-  // Transform to app format (increased limit for more variety)
-  return validMarkets.slice(0, 100).map(m => transformMarket(m));
+  // Log raw category distribution
+  const rawCategoryCount = {};
+  allTransformed.forEach(m => {
+    rawCategoryCount[m.category] = (rawCategoryCount[m.category] || 0) + 1;
+  });
+  console.log('[DFlow] Raw category distribution:', rawCategoryCount);
+
+  // Sort each category by expiration (soonest first)
+  const byCategory = {};
+  for (const market of allTransformed) {
+    const cat = market.category || 'Other';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(market);
+  }
+
+  // Sort each category by expiration
+  for (const cat of Object.keys(byCategory)) {
+    byCategory[cat].sort((a, b) => {
+      const expA = a.expirationTime || Infinity;
+      const expB = b.expirationTime || Infinity;
+      return expA - expB;
+    });
+  }
+
+  // Take up to 20 markets from each category (ensuring diversity)
+  const selected = [];
+  const maxPerCategory = 20;
+  for (const cat of Object.keys(byCategory)) {
+    selected.push(...byCategory[cat].slice(0, maxPerCategory));
+  }
+
+  // Log selected category distribution
+  const categoryCount = {};
+  selected.forEach(m => {
+    categoryCount[m.category] = (categoryCount[m.category] || 0) + 1;
+  });
+  console.log('[DFlow] Selected category distribution:', categoryCount);
+
+  // Interleave markets so the same category never appears consecutively
+  const interleaved = interleaveByCategory(selected);
+
+  return interleaved;
 }
 
 /**

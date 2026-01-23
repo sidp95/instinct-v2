@@ -67,22 +67,51 @@ async function fetchTransactionHistory(walletAddress) {
     // Transform to our format
     return transactions.map((tx, index) => {
       // Check if this is a DFlow/prediction market transaction
-      const isDFlowTx = tx.accountData?.some(acc => DFLOW_PROGRAMS.includes(acc.account)) ||
-        tx.instructions?.some(ix => DFLOW_PROGRAMS.includes(ix.programId)) ||
-        (tx.description && tx.description.toLowerCase().includes('swap'));
+      // Check multiple possible locations for program IDs
+      const allAccountKeys = tx.accountData?.map(acc => acc.account) || [];
+      const instructionProgramIds = tx.instructions?.map(ix => ix.programId) || [];
+      const allProgramIds = [...allAccountKeys, ...instructionProgramIds];
 
-      // Determine if deposit based on transfer direction
-      const isDeposit = tx.type === 'TRANSFER' && tx.tokenTransfers?.some(t => t.toUserAccount === walletAddress);
+      // Also check the transaction description and source
+      const description = (tx.description || '').toLowerCase();
+      const source = (tx.source || '').toLowerCase();
 
-      // Get transfer amount
-      const transfer = tx.tokenTransfers?.[0] || tx.nativeTransfers?.[0];
+      const isDFlowTx =
+        allProgramIds.some(id => DFLOW_PROGRAMS.includes(id)) ||
+        description.includes('swap') ||
+        description.includes('dflow') ||
+        source.includes('dflow') ||
+        // Check if any token transfer involves outcome tokens (not USDC deposits)
+        (tx.tokenTransfers?.length > 1 && tx.type === 'SWAP');
+
+      // Determine if this is a deposit (USDC coming IN to wallet)
+      const isDeposit = tx.tokenTransfers?.some(t =>
+        t.toUserAccount === walletAddress &&
+        t.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' // USDC mint
+      );
+
+      // Determine if this is a withdrawal (USDC going OUT to external address, not a swap)
+      const isWithdrawal = !isDFlowTx &&
+        tx.tokenTransfers?.some(t =>
+          t.fromUserAccount === walletAddress &&
+          t.toUserAccount !== walletAddress &&
+          t.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+        );
+
+      // Get transfer amount (prefer USDC transfers)
+      const usdcTransfer = tx.tokenTransfers?.find(t =>
+        t.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+      );
+      const transfer = usdcTransfer || tx.tokenTransfers?.[0] || tx.nativeTransfers?.[0];
       const amount = transfer?.tokenAmount || (transfer?.amount / 1_000_000_000) || 0;
 
-      // Determine transaction type
-      let type = 'withdrawal';
-      if (isDeposit) {
+      // Determine transaction type with correct priority
+      let type = 'bet'; // Default to bet for any outgoing USDC that's not a clear withdrawal
+      if (isDeposit && !isDFlowTx) {
         type = 'deposit';
-      } else if (isDFlowTx) {
+      } else if (isWithdrawal) {
+        type = 'withdrawal';
+      } else if (isDFlowTx || tx.type === 'SWAP') {
         type = 'bet';
       }
 
