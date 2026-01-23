@@ -1,15 +1,27 @@
-export default async function handler(req, res) {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+export const config = {
+  runtime: 'edge',
+};
 
+export default async function handler(req) {
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return new Response(null, {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
+    });
   }
 
   try {
-    const { inputMint, outputMint, amount, slippageBps, userPublicKey } = req.query;
+    const url = new URL(req.url);
+    const inputMint = url.searchParams.get('inputMint');
+    const outputMint = url.searchParams.get('outputMint');
+    const amount = url.searchParams.get('amount');
+    const slippageBps = url.searchParams.get('slippageBps') || '100';
+    const userPublicKey = url.searchParams.get('userPublicKey');
 
     console.log('[Proxy] Attempting trade:');
     console.log('  Input (USDC):', inputMint);
@@ -21,15 +33,14 @@ export default async function handler(req, res) {
       inputMint,
       outputMint,
       amount,
-      slippageBps: slippageBps || '100',
+      slippageBps,
       userPublicKey
     });
 
-    // Use new Trade API
     const orderUrl = `https://c.quote-api.dflow.net/order?${queryParams.toString()}`;
     console.log('[Proxy] GET order:', orderUrl);
 
-    // API key from environment variable (set in Vercel dashboard)
+    // API key from environment variable
     const apiKey = process.env.DFLOW_API_KEY;
 
     const headers = { 'Accept': 'application/json' };
@@ -47,20 +58,44 @@ export default async function handler(req, res) {
     console.log('[Proxy] Response:', text.substring(0, 300));
 
     if (response.status === 403) {
-      return res.status(403).json({
+      return new Response(JSON.stringify({
         error: 'DFlow API requires authentication. Check API key.',
         code: 'api_key_required'
+      }), {
+        status: 403,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
       });
     }
 
     try {
       const data = JSON.parse(text);
-      return res.status(response.status).json(data);
+      return new Response(JSON.stringify(data), {
+        status: response.status,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
     } catch (e) {
-      return res.status(response.status).send(text);
+      return new Response(text, {
+        status: response.status,
+        headers: {
+          'Content-Type': 'text/plain',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
     }
   } catch (error) {
     console.error('[Proxy] Error:', error);
-    return res.status(500).json({ error: error.message });
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
   }
 }

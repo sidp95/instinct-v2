@@ -13,11 +13,11 @@ const MAX_EXPIRY_HOURS = 24;
  * @returns {Promise<Array>} Array of markets with token mint addresses
  */
 export async function fetchActiveMarkets({ limit = 100 } = {}) {
-  // Use proxy in development to avoid CORS
+  // Use proxy to avoid CORS (local proxy in dev, Vercel serverless in prod)
   const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
   const baseUrl = isDev
     ? 'http://localhost:3001/api/markets'
-    : `${API_BASE}/events`;
+    : '/api/markets';
 
   try {
     const url = `${baseUrl}?withNestedMarkets=true&status=active&limit=${limit}`;
