@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { categoryColors } from '../data/markets';
-import { sampleClosedPositions } from '../data/sampleClosedPositions';
 import { useTheme } from '../context/ThemeContext';
 
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Weather', 'Stocks', 'Commodities'];
@@ -293,9 +292,9 @@ export default function HistoryPage({ bets }) {
     setIsRefreshing(false);
   };
 
-  // Combine real bets with sample closed positions for demo
+  // Use real bets only
   const allBets = useMemo(() => {
-    return [...bets, ...sampleClosedPositions];
+    return bets;
   }, [bets]);
 
   // Separate bets into open (pending) and closed (won/lost)
