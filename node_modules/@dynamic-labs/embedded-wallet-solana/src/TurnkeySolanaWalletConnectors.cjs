@@ -1,0 +1,26 @@
+'use client'
+'use strict';
+
+Object.defineProperty(exports, '__esModule', { value: true });
+
+var embeddedWallet = require('@dynamic-labs/embedded-wallet');
+var TurnkeySolanaWalletConnector = require('./lib/TurnkeySolanaWalletConnector/TurnkeySolanaWalletConnector.cjs');
+
+const TurnkeySolanaWalletConnectors = (props) => {
+    var _a;
+    if ((_a = props.apiProviders) === null || _a === void 0 ? void 0 : _a.turnkey) {
+        const TurnkeySolanaWalletConnectorConstructor = class extends TurnkeySolanaWalletConnector.TurnkeySolanaWalletConnector {
+            constructor(innerProps) {
+                super(embeddedWallet.TurnkeyWalletConnectorInfo.TurnkeyHD, Object.assign(Object.assign({}, props), innerProps));
+            }
+        };
+        Object.defineProperty(TurnkeySolanaWalletConnectorConstructor, 'key', {
+            value: 'turnkeyhd',
+            writable: false,
+        });
+        return [TurnkeySolanaWalletConnectorConstructor];
+    }
+    return [];
+};
+
+exports.TurnkeySolanaWalletConnectors = TurnkeySolanaWalletConnectors;

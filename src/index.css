@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  font-family: 'Comic Neue', cursive, sans-serif;
+}
+
+body {
+  background-color: #E8E8E8;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Comic-style button base */
+.btn-comic {
+  @apply font-bold border-3 border-comic-border rounded-comic shadow-comic
+         active:shadow-none active:translate-x-1 active:translate-y-1
+         transition-all duration-100 select-none;
+}
+
+/* Comic card style */
+.card-comic {
+  @apply bg-comic-paper border-3 border-comic-border rounded-comic shadow-comic;
+}
+
+/* Custom border width */
+@layer utilities {
+  .border-3 {
+    border-width: 3px;
+  }
+  .border-6 {
+    border-width: 6px;
+  }
+}
+
+/* Swipe card stamps */
+.stamp {
+  position: absolute;
+  font-size: 48px;
+  font-weight: bold;
+  text-transform: uppercase;
+  padding: 10px 20px;
+  border: 6px solid;
+  border-radius: 12px;
+  transform: rotate(-15deg);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.stamp-yes {
+  color: #22C55E;
+  border-color: #22C55E;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-15deg);
+}
+
+.stamp-no {
+  color: #EF4444;
+  border-color: #EF4444;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(15deg);
+}
+
+/* Decorative dots pattern */
+.dots-pattern {
+  background-image: radial-gradient(#222 1px, transparent 1px);
+  background-size: 20px 20px;
+  opacity: 0.05;
+}
+
+/* Hide scrollbar but allow scrolling */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Spin animation for refresh buttons */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

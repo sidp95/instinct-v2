@@ -1,0 +1,1 @@
+export { getConnectorConstructorForWalletStandardWallet } from './getConnectorConstructorForWalletStandardWallet';

@@ -1,0 +1,1 @@
+export { hasAllWalletStandardRequiredFeatures } from './hasAllWalletStandardRequiredFeatures';

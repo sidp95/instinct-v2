@@ -1,0 +1,64 @@
+{
+  "name": "@turnkey/solana",
+  "version": "1.0.42",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "license": "Apache-2.0",
+  "description": "Turnkey Solana Signer for @solana/web3js",
+  "keywords": [
+    "Turnkey",
+    "Solana",
+    "web3js",
+    "web3"
+  ],
+  "author": {
+    "name": "Turnkey",
+    "url": "https://turnkey.com/"
+  },
+  "homepage": "https://github.com/tkhq/sdk",
+  "bugs": {
+    "url": "https://github.com/tkhq/sdk/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tkhq/sdk.git",
+    "directory": "packages/solana"
+  },
+  "files": [
+    "dist/",
+    "CHANGELOG.md",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.8",
+    "@turnkey/http": "3.10.0",
+    "@turnkey/sdk-browser": "5.8.0",
+    "@turnkey/sdk-server": "4.7.0"
+  },
+  "devDependencies": {
+    "bs58": "^6.0.0",
+    "tweetnacl": "^1.0.3",
+    "@turnkey/api-key-stamper": "0.4.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "rollup -c",
+    "clean": "rimraf ./dist ./.cache",
+    "test": "DOTENV_CONFIG_PATH=.env.test jest --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.typecheck.json"
+  }
+}

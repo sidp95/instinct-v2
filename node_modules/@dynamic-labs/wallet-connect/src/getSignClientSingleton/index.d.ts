@@ -1,0 +1,1 @@
+export { getSignClientSingleton } from './getSignClientSingleton';
