@@ -295,28 +295,19 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
     // Must be active
     if (m.status !== 'active') return false;
 
-    // Filter for binary YES/NO markets only
+    // Exclude obvious multi-outcome markets (not binary YES/NO)
     const title = (m.title || '').toLowerCase();
     const eventTitle = (m.eventTitle || '').toLowerCase();
 
-    // Exclude obvious multi-outcome markets
     if (eventTitle.includes('who will win')) return false;
     if (eventTitle.includes('who will be')) return false;
     if (eventTitle.includes('which team')) return false;
     if (eventTitle.includes('which player')) return false;
-    if (title.includes('nomination') && !title.startsWith('will')) return false;
+    if (eventTitle.includes('winner of')) return false;
+    if (title.includes('winner of')) return false;
 
-    // Include if it's clearly a yes/no question
-    if (title.startsWith('will ')) return true;
-    if (title.startsWith('will the ')) return true;
-
-    // Include price/threshold questions (over/under)
-    if (title.includes(' above ') || title.includes(' below ')) return true;
-    if (title.includes(' over ') || title.includes(' under ')) return true;
-    if (title.includes(' at least ') || title.includes(' more than ') || title.includes(' less than ')) return true;
-
-    // Default: exclude if unclear
-    return false;
+    // Include all other markets (they have YES/NO tokens so they're binary)
+    return true;
   });
 
   console.log('[DFlow] Valid binary markets:', validMarkets.length);
@@ -328,8 +319,8 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
     return expA - expB;
   });
 
-  // Transform to app format
-  return validMarkets.slice(0, 50).map(m => transformMarket(m));
+  // Transform to app format (increased limit for more variety)
+  return validMarkets.slice(0, 100).map(m => transformMarket(m));
 }
 
 /**
