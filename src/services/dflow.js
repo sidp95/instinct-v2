@@ -283,7 +283,7 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
 
   const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
-  // Filter for valid, binary markets with pricing
+  // Filter for valid, binary YES/NO markets with pricing
   const validMarkets = rawMarkets.filter(m => {
     // Must have USDC settlement with token mints
     const usdcAccount = m.accounts?.[USDC_MINT];
@@ -295,19 +295,52 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
     // Must be active
     if (m.status !== 'active') return false;
 
-    // Exclude obvious multi-outcome markets (not binary YES/NO)
     const title = (m.title || '').toLowerCase();
     const eventTitle = (m.eventTitle || '').toLowerCase();
+    const ticker = (m.ticker || '').toUpperCase();
 
+    // EXCLUDE multi-outcome markets (not binary)
     if (eventTitle.includes('who will win')) return false;
     if (eventTitle.includes('who will be')) return false;
     if (eventTitle.includes('which team')) return false;
     if (eventTitle.includes('which player')) return false;
     if (eventTitle.includes('winner of')) return false;
+    if (eventTitle.includes('who wins')) return false;
     if (title.includes('winner of')) return false;
+    if (title.includes('who will win')) return false;
+    if (title.includes('who wins')) return false;
 
-    // Include all other markets (they have YES/NO tokens so they're binary)
-    return true;
+    // Exclude sports where draw is possible (soccer/football matches)
+    if (eventTitle.includes('soccer') && !title.includes('will ')) return false;
+    if (eventTitle.includes('premier league') && !title.includes('will ')) return false;
+    if (eventTitle.includes('champions league') && !title.includes('will ')) return false;
+    if (eventTitle.includes('world cup') && !title.includes('will ')) return false;
+
+    // INCLUDE: Crypto price predictions (binary by nature - above/below threshold)
+    if (ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL')) return true;
+    if (title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana')) return true;
+    if (title.includes(' above ') || title.includes(' below ')) return true;
+    if (title.includes(' over ') || title.includes(' under ')) return true;
+
+    // INCLUDE: Sports without draws (basketball, tennis, baseball, boxing, MMA/UFC)
+    if (ticker.includes('NBA') || ticker.includes('WNBA')) return true;
+    if (ticker.includes('NFL')) return true;
+    if (ticker.includes('MLB')) return true;
+    if (ticker.includes('UFC') || ticker.includes('MMA') || ticker.includes('BOXING')) return true;
+    if (eventTitle.includes('basketball')) return true;
+    if (eventTitle.includes('tennis')) return true;
+    if (eventTitle.includes('baseball')) return true;
+    if (eventTitle.includes('boxing') || eventTitle.includes('ufc') || eventTitle.includes('mma')) return true;
+
+    // INCLUDE: Clear YES/NO question format
+    if (title.startsWith('will ')) return true;
+    if (title.startsWith('is ')) return true;
+    if (title.startsWith('does ')) return true;
+    if (title.startsWith('can ')) return true;
+    if (title.includes(' at least ') || title.includes(' more than ') || title.includes(' less than ')) return true;
+
+    // Default: exclude unclear markets
+    return false;
   });
 
   console.log('[DFlow] Valid binary markets:', validMarkets.length);

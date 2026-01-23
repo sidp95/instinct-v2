@@ -409,6 +409,15 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         </div>
       </div>
 
+      {/* Swipe hints - directly below card */}
+      <div className="text-center py-2 text-sm font-bold" style={{ color: colors.textMuted }}>
+        <span className="opacity-60">&larr; NO</span>
+        <span className="mx-4 opacity-60">|</span>
+        <span className="opacity-60">SKIP &uarr;</span>
+        <span className="mx-4 opacity-60">|</span>
+        <span className="opacity-60">YES &rarr;</span>
+      </div>
+
       {/* Bet Buttons */}
       <div className="px-4 py-4">
         <div className="flex gap-4 max-w-md mx-auto">
@@ -438,15 +447,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
           >
             YES +${(currentMarket.yesProfit * betSize).toFixed(2)}
           </motion.button>
-        </div>
-
-        {/* Swipe hints */}
-        <div className="text-center mt-3 text-sm font-bold" style={{ color: colors.textMuted }}>
-          <span className="opacity-60">&larr; NO</span>
-          <span className="mx-4 opacity-60">|</span>
-          <span className="opacity-60">SKIP &uarr;</span>
-          <span className="mx-4 opacity-60">|</span>
-          <span className="opacity-60">YES &rarr;</span>
         </div>
       </div>
     </div>

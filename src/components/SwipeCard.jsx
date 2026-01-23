@@ -52,7 +52,18 @@ export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit 
 
     console.log('[SwipeCard] handleDragEnd - offset:', info.offset.x, info.offset.y);
 
-    if (info.offset.x > threshold) {
+    // Check if vertical movement is dominant (for skip) - prioritize this
+    const isVerticalDominant = Math.abs(info.offset.y) > Math.abs(info.offset.x) * 0.7;
+
+    if (isVerticalDominant && info.offset.y < -yThreshold) {
+      // Swipe up - SKIP (prioritize when vertical movement is dominant)
+      animate(y, -500, { duration: 0.3 });
+      animate(x, 0, { duration: 0.3 });
+      setTimeout(() => {
+        console.log('[SwipeCard] Calling onSwipe(skip)');
+        onSwipe('skip');
+      }, 300);
+    } else if (info.offset.x > threshold) {
       // Swipe right - YES
       animate(x, 500, { duration: 0.3 });
       setTimeout(() => {
@@ -65,13 +76,6 @@ export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit 
       setTimeout(() => {
         console.log('[SwipeCard] Calling onSwipe(no)');
         onSwipe('no');
-      }, 300);
-    } else if (info.offset.y < -yThreshold) {
-      // Swipe up - SKIP
-      animate(y, -500, { duration: 0.3 });
-      setTimeout(() => {
-        console.log('[SwipeCard] Calling onSwipe(skip)');
-        onSwipe('skip');
       }, 300);
     } else {
       // Snap back to center
