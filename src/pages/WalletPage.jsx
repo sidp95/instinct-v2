@@ -75,45 +75,66 @@ async function fetchTransactionHistory(walletAddress) {
       // Also check the transaction description and source
       const description = (tx.description || '').toLowerCase();
       const source = (tx.source || '').toLowerCase();
+      const txType = (tx.type || '').toUpperCase();
 
+      // More comprehensive DFlow/swap detection
       const isDFlowTx =
         allProgramIds.some(id => DFLOW_PROGRAMS.includes(id)) ||
         description.includes('swap') ||
         description.includes('dflow') ||
+        description.includes('predict') ||
         source.includes('dflow') ||
-        // Check if any token transfer involves outcome tokens (not USDC deposits)
-        (tx.tokenTransfers?.length > 1 && tx.type === 'SWAP');
+        source.includes('jupiter') ||
+        txType === 'SWAP' ||
+        // Multiple token transfers usually indicate a swap/bet, not a simple withdrawal
+        (tx.tokenTransfers?.length > 1);
 
-      // Determine if this is a deposit (USDC coming IN to wallet)
-      const isDeposit = tx.tokenTransfers?.some(t =>
+      // Determine if this is a deposit (USDC coming IN to wallet from external source)
+      const usdcIncoming = tx.tokenTransfers?.find(t =>
         t.toUserAccount === walletAddress &&
-        t.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' // USDC mint
+        t.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+      );
+      const usdcOutgoing = tx.tokenTransfers?.find(t =>
+        t.fromUserAccount === walletAddress &&
+        t.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
       );
 
-      // Determine if this is a withdrawal (USDC going OUT to external address, not a swap)
-      const isWithdrawal = !isDFlowTx &&
-        tx.tokenTransfers?.some(t =>
-          t.fromUserAccount === walletAddress &&
-          t.toUserAccount !== walletAddress &&
-          t.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
-        );
+      // It's a deposit only if USDC is coming in AND there's no outgoing USDC in same tx
+      const isDeposit = usdcIncoming && !usdcOutgoing && !isDFlowTx;
+
+      // A withdrawal is ONLY when:
+      // 1. It's a simple transfer (only 1 token transfer)
+      // 2. USDC going out
+      // 3. NOT a swap/dflow transaction
+      // 4. Description suggests it's a transfer (not a swap)
+      const isClearlySimpleTransfer =
+        tx.tokenTransfers?.length === 1 &&
+        !description.includes('swap') &&
+        !description.includes('buy') &&
+        !description.includes('sell') &&
+        txType !== 'SWAP';
+
+      const isWithdrawal = isClearlySimpleTransfer &&
+        !isDFlowTx &&
+        usdcOutgoing &&
+        !usdcIncoming;
 
       // Get transfer amount (prefer USDC transfers)
-      const usdcTransfer = tx.tokenTransfers?.find(t =>
+      const usdcTransfer = usdcOutgoing || usdcIncoming || tx.tokenTransfers?.find(t =>
         t.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
       );
       const transfer = usdcTransfer || tx.tokenTransfers?.[0] || tx.nativeTransfers?.[0];
       const amount = transfer?.tokenAmount || (transfer?.amount / 1_000_000_000) || 0;
 
-      // Determine transaction type with correct priority
-      let type = 'bet'; // Default to bet for any outgoing USDC that's not a clear withdrawal
-      if (isDeposit && !isDFlowTx) {
+      // Determine transaction type - default to bet unless clearly something else
+      // This ensures bets are never mislabeled as withdrawals
+      let type = 'bet';
+      if (isDeposit) {
         type = 'deposit';
       } else if (isWithdrawal) {
         type = 'withdrawal';
-      } else if (isDFlowTx || tx.type === 'SWAP') {
-        type = 'bet';
       }
+      // Everything else (including unknown outgoing USDC) defaults to 'bet'
 
       return {
         id: tx.signature || index,

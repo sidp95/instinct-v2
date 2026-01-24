@@ -76,12 +76,13 @@ function MainApp({ audioContext }) {
 }
 
 function AppContent() {
-  const { sdkHasLoaded, user, primaryWallet } = useDynamicContext();
+  const { sdkHasLoaded, user, primaryWallet, refreshUser } = useDynamicContext();
   const waas = useDynamicWaas();
   const { colors } = useTheme();
   const [audioContext, setAudioContext] = useState(null);
   const [isCreatingWallet, setIsCreatingWallet] = useState(false);
   const [walletCreationAttempted, setWalletCreationAttempted] = useState(false);
+  const [walletCreationComplete, setWalletCreationComplete] = useState(false);
 
   const isAuthenticated = !!user;
   const hasWallet = !!primaryWallet;
@@ -95,8 +96,9 @@ function AppContent() {
       primaryWallet: primaryWallet?.address,
       waasAvailable: !!waas,
       userHasEmbeddedWallet: waas?.userHasEmbeddedWallet,
+      walletCreationComplete,
     });
-  }, [sdkHasLoaded, isAuthenticated, hasWallet, primaryWallet, waas]);
+  }, [sdkHasLoaded, isAuthenticated, hasWallet, primaryWallet, waas, walletCreationComplete]);
 
   // Auto-create embedded wallet if user doesn't have one
   useEffect(() => {
@@ -106,23 +108,57 @@ function AppContent() {
         !hasWallet &&
         !isCreatingWallet &&
         !walletCreationAttempted &&
+        !walletCreationComplete &&
         waas?.createWalletAccount
       ) {
         setIsCreatingWallet(true);
         setWalletCreationAttempted(true);
         try {
           console.log('[App] Creating embedded Solana wallet...');
-          await waas.createWalletAccount([ChainEnum.Sol]);
+
+          // Add timeout to prevent hanging forever
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Wallet creation timeout')), 30000)
+          );
+
+          await Promise.race([
+            waas.createWalletAccount([ChainEnum.Sol]),
+            timeoutPromise
+          ]);
+
           console.log('[App] Embedded wallet created!');
+
+          // Refresh user data to ensure wallet is detected
+          if (refreshUser) {
+            console.log('[App] Refreshing user data...');
+            await refreshUser();
+          }
+
+          // Mark creation as complete - this will allow proceeding even if primaryWallet hasn't updated yet
+          setWalletCreationComplete(true);
         } catch (e) {
           console.error('[App] Failed to create embedded wallet:', e);
+          // Even on failure, mark as complete to prevent infinite loading
+          setWalletCreationComplete(true);
         } finally {
           setIsCreatingWallet(false);
         }
       }
     };
     createWallet();
-  }, [isAuthenticated, hasWallet, waas, isCreatingWallet, walletCreationAttempted]);
+  }, [isAuthenticated, hasWallet, waas, isCreatingWallet, walletCreationAttempted, walletCreationComplete, refreshUser]);
+
+  // Safety timeout: if still creating wallet after 15 seconds, proceed anyway
+  useEffect(() => {
+    if (isCreatingWallet) {
+      const timeout = setTimeout(() => {
+        console.log('[App] Wallet creation taking too long, proceeding anyway...');
+        setIsCreatingWallet(false);
+        setWalletCreationComplete(true);
+      }, 15000);
+      return () => clearTimeout(timeout);
+    }
+  }, [isCreatingWallet]);
 
   useEffect(() => {
     if (isAuthenticated && !audioContext) {
