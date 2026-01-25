@@ -98,3 +98,8 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* Hide Dynamic secure enclave iframe (needed for headless OTP sessions) */
+iframe[id*="dyn-secure-enclave-element-id"] {
+  display: none;
+}

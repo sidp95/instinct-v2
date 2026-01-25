@@ -13,8 +13,10 @@ export default function Navigation({ activeTab, onTabChange }) {
     <nav style={{
       position: 'fixed',
       bottom: 0,
-      left: 0,
-      right: 0,
+      left: '50%',
+      transform: 'translateX(-50%)',
+      width: '100%',
+      maxWidth: '480px',
       height: '80px',
       backgroundColor: colors.backgroundSecondary,
       borderTop: `3px solid ${colors.border}`,
@@ -23,6 +25,7 @@ export default function Navigation({ activeTab, onTabChange }) {
       justifyContent: 'space-around',
       alignItems: 'center',
       padding: '0 16px',
+      boxSizing: 'border-box',
     }}>
       {tabs.map((tab) => (
         <button

@@ -233,12 +233,40 @@ function AppContent() {
   );
 }
 
+// Wrapper component to constrain app to mobile-like view on desktop
+function AppContainer({ children }) {
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        justifyContent: 'center',
+        backgroundColor: '#1a1a1a', // Dark background outside the app
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '480px',
+          minHeight: '100vh',
+          position: 'relative',
+          boxShadow: '0 0 50px rgba(0, 0, 0, 0.5)',
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
-    <ThemeProvider>
-      <DynamicProvider>
-        <AppContent />
-      </DynamicProvider>
-    </ThemeProvider>
+    <AppContainer>
+      <ThemeProvider>
+        <DynamicProvider>
+          <AppContent />
+        </DynamicProvider>
+      </ThemeProvider>
+    </AppContainer>
   );
 }

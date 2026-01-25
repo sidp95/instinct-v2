@@ -11,6 +11,7 @@
     "proxy": "node proxy-server.js"
   },
   "dependencies": {
+    "@dynamic-labs/embedded-wallet": "^4.57.2",
     "@dynamic-labs/ethereum-aa": "^4.57.1",
     "@dynamic-labs/sdk-react-core": "^4.57.1",
     "@dynamic-labs/solana": "^4.57.1",
