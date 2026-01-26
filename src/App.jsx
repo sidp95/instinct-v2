@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useDynamicContext, useDynamicWaas } from '@dynamic-labs/sdk-react-core';
 import { ChainEnum } from '@dynamic-labs/sdk-api-core';
 import { useLocalStorage } from './hooks/useLocalStorage';
+import { useOnChainPositions } from './hooks/useOnChainPositions';
 import { ToastProvider } from './context/ToastContext';
 import { AudioContextProvider } from './context/AudioContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
@@ -13,12 +14,51 @@ import BettingPage from './pages/BettingPage';
 import HistoryPage from './pages/HistoryPage';
 import WalletPage from './pages/WalletPage';
 
-function MainApp({ audioContext }) {
+function MainApp({ audioContext, walletAddress }) {
   const { colors, isDark } = useTheme();
   const [activeTab, setActiveTab] = useState('wallet'); // Default to wallet for export
   const [balance, setBalance] = useLocalStorage('instinct-balance', 100);
   const [betSize, setBetSize] = useLocalStorage('instinct-betsize', 1);
   const [bets, setBets] = useLocalStorage('instinct-bets', []);
+
+  // Fetch on-chain positions (source of truth for actual holdings)
+  const { positions: onChainPositions, isLoading: positionsLoading, refetch: refetchPositions } = useOnChainPositions(walletAddress);
+
+  // Merge localStorage bets with on-chain positions
+  // On-chain positions take precedence as they're the source of truth
+  const mergedBets = useMemo(() => {
+    // Create a map of on-chain positions by market ID + choice
+    const onChainMap = new Map();
+    for (const pos of onChainPositions) {
+      const key = `${pos.market.id}-${pos.choice}`;
+      onChainMap.set(key, pos);
+    }
+
+    // Start with localStorage bets, but update amounts from on-chain data
+    const merged = bets.map(bet => {
+      const key = `${bet.market.id}-${bet.choice}`;
+      const onChain = onChainMap.get(key);
+
+      if (onChain) {
+        // Remove from map so we don't add it twice
+        onChainMap.delete(key);
+        // Return localStorage bet but with on-chain amount if different
+        return {
+          ...bet,
+          onChainAmount: onChain.amount,
+          isOnChain: true,
+        };
+      }
+      return bet;
+    });
+
+    // Add any on-chain positions not in localStorage (e.g., from previous deployments)
+    for (const pos of onChainMap.values()) {
+      merged.push(pos);
+    }
+
+    return merged;
+  }, [bets, onChainPositions]);
 
   const handlePlaceBet = (bet) => {
     if (balance >= bet.amount) {
@@ -41,7 +81,7 @@ function MainApp({ audioContext }) {
           />
         );
       case 'history':
-        return <HistoryPage bets={bets} />;
+        return <HistoryPage bets={mergedBets} isLoadingPositions={positionsLoading} onRefresh={refetchPositions} />;
       case 'wallet':
         return (
           <WalletPage
@@ -228,7 +268,7 @@ function AppContent() {
 
   return (
     <ToastProvider>
-      <MainApp audioContext={audioContext} />
+      <MainApp audioContext={audioContext} walletAddress={primaryWallet?.address} />
     </ToastProvider>
   );
 }

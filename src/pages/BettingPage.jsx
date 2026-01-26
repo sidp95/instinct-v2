@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { isSolanaWallet } from '@dynamic-labs/solana';
@@ -6,9 +6,11 @@ import { Connection, VersionedTransaction } from '@solana/web3.js';
 import SwipeCard from '../components/SwipeCard';
 import Timer from '../components/Timer';
 import Header from '../components/Header';
+import CategoryFilter from '../components/CategoryFilter';
 import { getMarketsForApp, placeBet } from '../services/dflow';
 import { useToast } from '../context/ToastContext';
 import { useTheme } from '../context/ThemeContext';
+import { useMarketHistory } from '../hooks/useMarketHistory';
 
 const SOLANA_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
 
@@ -99,11 +101,13 @@ function LogoutButton({ onLogout, colors }) {
   );
 }
 
+const ALL_CATEGORIES = ['Crypto', 'Sports', 'Politics', 'Finance', 'Tech', 'Culture', 'Other'];
+
 export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }) {
   const { handleLogOut, primaryWallet } = useDynamicContext();
   const { isDark, toggleTheme, colors } = useTheme();
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [markets, setMarkets] = useState([]);
+  const [allMarkets, setAllMarkets] = useState([]); // Raw markets from API
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [isPlacingBet, setIsPlacingBet] = useState(false);
@@ -111,6 +115,48 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
 
   // Get wallet from Dynamic
   const walletAddress = primaryWallet?.address || null;
+
+  // Market history - persists interacted markets per wallet
+  const { addToHistory, filterMarkets: filterByHistory } = useMarketHistory(walletAddress);
+
+  // Category filter state - default all selected
+  const [selectedCategories, setSelectedCategories] = useState(() => new Set(ALL_CATEGORIES));
+
+  // Toggle a category on/off
+  const handleCategoryToggle = useCallback((category) => {
+    setSelectedCategories(prev => {
+      const updated = new Set(prev);
+      if (updated.has(category)) {
+        // Don't allow deselecting if it's the only one selected
+        if (updated.size > 1) {
+          updated.delete(category);
+        }
+      } else {
+        updated.add(category);
+      }
+      return updated;
+    });
+    // Reset index when filter changes
+    setCurrentIndex(0);
+  }, []);
+
+  // Filter markets by history and category
+  const markets = useMemo(() => {
+    // First filter out interacted markets
+    const afterHistory = filterByHistory(allMarkets);
+    // Then filter by selected categories
+    const afterCategory = afterHistory.filter(market =>
+      selectedCategories.has(market.category)
+    );
+    console.log(`[BettingPage] Filtered markets: ${allMarkets.length} -> ${afterHistory.length} (history) -> ${afterCategory.length} (category)`);
+    return afterCategory;
+  }, [allMarkets, filterByHistory, selectedCategories]);
+
+  // Get available categories from current markets
+  const availableCategories = useMemo(() => {
+    const cats = new Set(allMarkets.map(m => m.category));
+    return ALL_CATEGORIES.filter(cat => cats.has(cat));
+  }, [allMarkets]);
 
   // Debug logging
   console.log('[BettingPage] primaryWallet object:', primaryWallet);
@@ -128,7 +174,7 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         if (isMounted) {
           console.log('[BettingPage] Loaded markets:', data.length);
           console.log('[BettingPage] First 5 markets IDs:', data.slice(0, 5).map(m => ({ id: m.id, ticker: m.ticker, title: m.title?.substring(0, 30) })));
-          setMarkets(data);
+          setAllMarkets(data);
           setIsLoading(false);
         }
       } catch (err) {
@@ -162,9 +208,10 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
       return;
     }
 
-    // Handle skip - just move to next card
+    // Handle skip - save to history and move to next card
     if (dir === 'skip') {
-      console.log('[BettingPage] SKIP - advancing to next card');
+      console.log('[BettingPage] SKIP - saving to history and advancing');
+      addToHistory(currentMarket.id);
       setCurrentIndex((prev) => prev + 1);
       return;
     }
@@ -264,6 +311,9 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
           txSignature: signature,
         });
 
+        // Save to history so this market won't appear again
+        addToHistory(currentMarket.id);
+
         setIsPlacingBet(false);
         setCurrentIndex((prev) => prev + 1);
 
@@ -274,14 +324,18 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         setCurrentIndex((prev) => prev + 1);
       }
     }
-  }, [currentMarket, betSize, onPlaceBet, balance, error, success, warning, goToWallet, walletAddress, isPlacingBet, primaryWallet]);
+  }, [currentMarket, betSize, onPlaceBet, balance, error, success, warning, goToWallet, walletAddress, isPlacingBet, primaryWallet, addToHistory]);
 
   const handleTimerComplete = useCallback(() => {
     // Show expired toast
     warning('Too slow!', { duration: 3000 });
+    // Save to history (treat timeout as skip)
+    if (currentMarket) {
+      addToHistory(currentMarket.id);
+    }
     // Skip to next card when timer runs out
     setCurrentIndex((prev) => prev + 1);
-  }, [warning]);
+  }, [warning, currentMarket, addToHistory]);
 
   const handleButtonClick = (choice) => {
     handleSwipe(choice);
@@ -339,17 +393,57 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
 
   // No markets available
   if (!currentMarket) {
+    const hasAllMarkets = allMarkets.length > 0;
+    const afterHistoryCount = filterByHistory(allMarkets).length;
+    const allSeenInCategory = hasAllMarkets && afterHistoryCount === 0;
+    const filteredOutByCategory = hasAllMarkets && afterHistoryCount > 0 && markets.length === 0;
+
+    // Check if specific categories have no markets at all (not just filtered)
+    const selectedCategoriesArray = Array.from(selectedCategories);
+    const noCategoryMarkets = hasAllMarkets && selectedCategoriesArray.length > 0 &&
+      !allMarkets.some(m => selectedCategories.has(m.category));
+
     return (
       <div className="flex flex-col h-full pb-20">
+        <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
+        <LogoutButton onLogout={() => handleLogOut()} colors={colors} />
         <Header />
+
+        {/* Show category filter so user can adjust */}
+        {hasAllMarkets && (
+          <CategoryFilter
+            selectedCategories={selectedCategories}
+            onToggle={handleCategoryToggle}
+            availableCategories={availableCategories}
+          />
+        )}
+
         <div className="flex-1 flex items-center justify-center px-4">
           <div
             className="card-comic p-8 text-center max-w-sm"
             style={{ backgroundColor: colors.paper, borderColor: colors.border }}
           >
-            <div className="text-4xl mb-4" style={{ color: colors.text }}>0</div>
-            <p className="text-lg font-bold" style={{ color: colors.text }}>No markets available</p>
-            <p className="text-sm" style={{ color: colors.textSecondary }}>Check back later for new prediction markets!</p>
+            <div className="text-4xl mb-4" style={{ color: colors.text }}>
+              {allSeenInCategory ? '✓' : (filteredOutByCategory || noCategoryMarkets) ? '📭' : '0'}
+            </div>
+            <p className="text-lg font-bold" style={{ color: colors.text }}>
+              {allSeenInCategory
+                ? "You've seen all markets!"
+                : noCategoryMarkets
+                  ? 'No markets in this category right now'
+                  : filteredOutByCategory
+                    ? "You've seen all markets in these categories"
+                    : 'No markets available'}
+            </p>
+            <p className="text-sm" style={{ color: colors.textSecondary }}>
+              {allSeenInCategory
+                ? 'Check back later for new prediction markets'
+                : noCategoryMarkets
+                  ? 'Check back soon!'
+                  : filteredOutByCategory
+                    ? 'Try selecting more categories above'
+                    : 'Check back later for new prediction markets!'}
+            </p>
           </div>
         </div>
       </div>
@@ -369,6 +463,13 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
       <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
       <LogoutButton onLogout={() => handleLogOut()} colors={colors} />
       <Header />
+
+      {/* Category Filter */}
+      <CategoryFilter
+        selectedCategories={selectedCategories}
+        onToggle={handleCategoryToggle}
+        availableCategories={availableCategories}
+      />
 
       {/* Timer Section */}
       <div className="flex justify-center py-4">

@@ -346,26 +346,75 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
 
   const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
+  // Log raw crypto-related markets before filtering
+  const cryptoRaw = rawMarkets.filter(m => {
+    const ticker = (m.ticker || '').toUpperCase();
+    const title = (m.title || '').toLowerCase();
+    return ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL') ||
+           title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana') || title.includes('crypto');
+  });
+  console.log('[DFlow] Raw crypto-related markets:', cryptoRaw.length);
+  if (cryptoRaw.length > 0) {
+    console.log('[DFlow] Sample crypto markets:', cryptoRaw.slice(0, 5).map(m => ({
+      ticker: m.ticker,
+      title: m.title,
+      status: m.status,
+      hasUsdc: !!m.accounts?.[USDC_MINT],
+      hasPricing: !!(m.yesAsk && m.noAsk),
+      yesAsk: m.yesAsk,
+      noAsk: m.noAsk,
+    })));
+  }
+
   // Filter for valid, binary YES/NO markets with pricing
   const validMarkets = rawMarkets.filter(m => {
+    const ticker = (m.ticker || '').toUpperCase();
+    const title = (m.title || '').toLowerCase();
+    const isCrypto = ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL') ||
+                     title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana');
+
     // Must have USDC settlement with token mints
     const usdcAccount = m.accounts?.[USDC_MINT];
-    if (!usdcAccount?.yesMint || !usdcAccount?.noMint) return false;
+    if (!usdcAccount?.yesMint || !usdcAccount?.noMint) {
+      if (isCrypto) console.log('[DFlow] Crypto market filtered (no USDC mints):', m.ticker, m.title?.substring(0, 40));
+      return false;
+    }
 
     // Must have pricing
-    if (!m.yesAsk || !m.noAsk) return false;
+    if (!m.yesAsk || !m.noAsk) {
+      if (isCrypto) console.log('[DFlow] Crypto market filtered (no pricing):', m.ticker, m.title?.substring(0, 40));
+      return false;
+    }
 
     // Must be active
-    if (m.status !== 'active') return false;
+    if (m.status !== 'active') {
+      if (isCrypto) console.log('[DFlow] Crypto market filtered (not active):', m.ticker, m.status);
+      return false;
+    }
 
     // Binary filter: title must start with "Will" (YES/NO question)
-    const title = (m.title || '').toLowerCase().trim();
-    if (!title.startsWith('will ')) return false;
+    const titleLower = (m.title || '').toLowerCase().trim();
+    if (!titleLower.startsWith('will ')) {
+      if (isCrypto) console.log('[DFlow] Crypto market filtered (no "Will" prefix):', m.ticker, m.title?.substring(0, 50));
+      return false;
+    }
 
     return true;
   });
 
   console.log('[DFlow] Valid binary markets:', validMarkets.length);
+
+  // Log valid crypto markets that passed filters
+  const validCrypto = validMarkets.filter(m => {
+    const ticker = (m.ticker || '').toUpperCase();
+    const title = (m.title || '').toLowerCase();
+    return ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL') ||
+           title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana');
+  });
+  console.log('[DFlow] Valid crypto markets after filtering:', validCrypto.length);
+  if (validCrypto.length > 0) {
+    console.log('[DFlow] Valid crypto market samples:', validCrypto.slice(0, 3).map(m => ({ ticker: m.ticker, title: m.title?.substring(0, 40) })));
+  }
 
   // Transform ALL valid markets first (so we can categorize them)
   const allTransformed = validMarkets.map(m => transformMarket(m));
@@ -423,6 +472,85 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
  * @param {string} options.userPublicKey - User's Solana wallet address
  * @returns {Promise<Object>} Order response with transaction data
  */
+/**
+ * Fetch user's prediction market positions from on-chain token balances
+ * This is the source of truth - positions are SPL tokens on Solana
+ * @param {string} userPublicKey - User's Solana wallet address
+ * @param {Array} markets - Array of market objects with yesMint/noMint
+ * @returns {Promise<Array>} Array of positions with market info and amounts
+ */
+export async function fetchUserPositionsOnChain(userPublicKey, markets) {
+  if (!userPublicKey || !markets || markets.length === 0) {
+    return [];
+  }
+
+  const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
+
+  try {
+    console.log('[DFlow] Fetching on-chain positions for:', userPublicKey);
+
+    // Fetch all token accounts for the user
+    const response = await fetch(HELIUS_RPC, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getTokenAccountsByOwner',
+        params: [
+          userPublicKey,
+          { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
+          { encoding: 'jsonParsed' }
+        ]
+      })
+    });
+
+    const data = await response.json();
+    if (!data.result?.value) {
+      console.log('[DFlow] No token accounts found');
+      return [];
+    }
+
+    // Build a map of mint -> market info for quick lookup
+    const mintToMarket = new Map();
+    for (const market of markets) {
+      if (market.yesMint) {
+        mintToMarket.set(market.yesMint, { market, side: 'yes' });
+      }
+      if (market.noMint) {
+        mintToMarket.set(market.noMint, { market, side: 'no' });
+      }
+    }
+
+    // Find positions (token accounts that match our prediction market mints)
+    const positions = [];
+    for (const account of data.result.value) {
+      const parsed = account.account?.data?.parsed?.info;
+      if (!parsed) continue;
+
+      const mint = parsed.mint;
+      const amount = parseFloat(parsed.tokenAmount?.uiAmount || 0);
+
+      if (amount > 0 && mintToMarket.has(mint)) {
+        const { market, side } = mintToMarket.get(mint);
+        positions.push({
+          market,
+          choice: side,
+          amount: amount, // This is the number of outcome tokens
+          tokenMint: mint,
+          tokenAccount: account.pubkey,
+        });
+      }
+    }
+
+    console.log('[DFlow] Found', positions.length, 'on-chain positions');
+    return positions;
+  } catch (error) {
+    console.error('[DFlow] Failed to fetch on-chain positions:', error);
+    return [];
+  }
+}
+
 export async function placeBet({ market, side, amount, userPublicKey }) {
   console.log('[DFlow] Placing bet:', { market: market.id, side, amount, userPublicKey });
 

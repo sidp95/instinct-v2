@@ -281,20 +281,26 @@ function FilterBar({ selectedCategory, setSelectedCategory, sortBy, setSortBy, c
   );
 }
 
-export default function HistoryPage({ bets }) {
+export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
   const { colors } = useTheme();
   const [activeTab, setActiveTab] = useState('open');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [sortBy, setSortBy] = useState('newest');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Simulate refresh (in future, this could fetch from API)
+  // Refresh positions from on-chain
   const handleRefresh = async () => {
-    if (isRefreshing) return;
+    if (isRefreshing || isLoadingPositions) return;
     setIsRefreshing(true);
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 800));
-    setIsRefreshing(false);
+    try {
+      if (onRefresh) {
+        await onRefresh();
+      }
+    } finally {
+      // Add a small delay for visual feedback
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setIsRefreshing(false);
+    }
   };
 
   // Use real bets only
