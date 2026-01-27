@@ -5,6 +5,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Connection, PublicKey, Transaction, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
 import { getAssociatedTokenAddress, createTransferInstruction, createAssociatedTokenAccountInstruction, getAccount } from '@solana/spl-token';
 import { useTheme } from '../context/ThemeContext';
+import LogoutButton from '../components/LogoutButton';
 
 const presetAmounts = [1, 2, 5, 10, 25];
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -50,13 +51,21 @@ async function fetchSolBalance(walletAddress) {
 
 async function fetchTransactionHistory(walletAddress) {
   try {
+    console.log('[DEBUG-WALLET] ========================================');
+    console.log('[DEBUG-WALLET] fetchTransactionHistory STARTING');
+    console.log('[DEBUG-WALLET] Wallet address being queried:', walletAddress);
+
     const apiKey = 'fc70f382-f7ec-48d3-a615-9bacd782570e';
     const url = `https://api.helius.xyz/v0/addresses/${walletAddress}/transactions?api-key=${apiKey}&limit=10`;
+
+    console.log('[DEBUG-WALLET] Helius API URL:', url);
 
     const response = await fetch(url);
     const transactions = await response.json();
 
-    console.log('Transaction history:', transactions);
+    console.log('[DEBUG-WALLET] Helius API response status:', response.status);
+    console.log('[DEBUG-WALLET] Number of transactions returned:', transactions.length);
+    console.log('[DEBUG-WALLET] Raw transactions:', JSON.stringify(transactions.slice(0, 2), null, 2));
 
     // DFlow prediction market program IDs
     const DFLOW_PROGRAMS = [
@@ -65,7 +74,15 @@ async function fetchTransactionHistory(walletAddress) {
     ];
 
     // Transform to our format
+    console.log('[DEBUG-WALLET] Processing', transactions.length, 'transactions...');
+
     return transactions.map((tx, index) => {
+      console.log('[DEBUG-WALLET] ----------------------------------------');
+      console.log('[DEBUG-WALLET] Processing tx #', index, 'sig:', tx.signature?.substring(0, 20));
+      console.log('[DEBUG-WALLET] tx.type:', tx.type, 'tx.source:', tx.source);
+      console.log('[DEBUG-WALLET] tx.description:', tx.description);
+      console.log('[DEBUG-WALLET] tokenTransfers count:', tx.tokenTransfers?.length || 0);
+
       // Check if this is a DFlow/prediction market transaction
       // Check multiple possible locations for program IDs
       const allAccountKeys = tx.accountData?.map(acc => acc.account) || [];
@@ -89,6 +106,8 @@ async function fetchTransactionHistory(walletAddress) {
         // Multiple token transfers usually indicate a swap/bet, not a simple withdrawal
         (tx.tokenTransfers?.length > 1);
 
+      console.log('[DEBUG-WALLET] isDFlowTx:', isDFlowTx, '(programIds checked:', allProgramIds.slice(0, 3), ')');
+
       // Determine if this is a deposit (USDC coming IN to wallet from external source)
       const usdcIncoming = tx.tokenTransfers?.find(t =>
         t.toUserAccount === walletAddress &&
@@ -98,6 +117,9 @@ async function fetchTransactionHistory(walletAddress) {
         t.fromUserAccount === walletAddress &&
         t.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
       );
+
+      console.log('[DEBUG-WALLET] usdcIncoming:', usdcIncoming ? `$${usdcIncoming.tokenAmount}` : 'none');
+      console.log('[DEBUG-WALLET] usdcOutgoing:', usdcOutgoing ? `$${usdcOutgoing.tokenAmount}` : 'none');
 
       // It's a deposit only if USDC is coming in AND there's no outgoing USDC in same tx
       const isDeposit = usdcIncoming && !usdcOutgoing && !isDFlowTx;
@@ -119,6 +141,8 @@ async function fetchTransactionHistory(walletAddress) {
         usdcOutgoing &&
         !usdcIncoming;
 
+      console.log('[DEBUG-WALLET] isDeposit:', isDeposit, 'isWithdrawal:', isWithdrawal);
+
       // Get transfer amount (prefer USDC transfers)
       const usdcTransfer = usdcOutgoing || usdcIncoming || tx.tokenTransfers?.find(t =>
         t.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
@@ -135,6 +159,8 @@ async function fetchTransactionHistory(walletAddress) {
         type = 'withdrawal';
       }
       // Everything else (including unknown outgoing USDC) defaults to 'bet'
+
+      console.log('[DEBUG-WALLET] CLASSIFIED AS:', type, 'amount:', amount);
 
       return {
         id: tx.signature || index,
@@ -862,6 +888,7 @@ export default function WalletPage({ betSize, setBetSize }) {
 
   return (
     <>
+      <LogoutButton />
       <div style={{
         display: 'flex',
         flexDirection: 'column',
@@ -869,6 +896,7 @@ export default function WalletPage({ betSize, setBetSize }) {
         padding: '16px',
         gap: '12px',
         overflow: 'hidden',
+        position: 'relative',
       }}>
         {/* Balance Card */}
         <div

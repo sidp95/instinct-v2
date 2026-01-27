@@ -1,42 +1,26 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchUserPositionsOnChain, getMarketsForApp } from '../services/dflow';
+import { fetchUserPositionsOnChain } from '../services/dflow';
 
 /**
  * Hook to fetch user's on-chain prediction market positions.
+ * Uses DFlow's filter_outcome_mints and markets/batch APIs.
  * This is the source of truth - positions are SPL tokens on Solana.
- * Works across sessions and deployments since data is on-chain.
  *
  * @param {string} walletAddress - User's Solana wallet address
  * @returns {Object} { positions, isLoading, error, refetch }
  */
 export function useOnChainPositions(walletAddress) {
   const [positions, setPositions] = useState([]);
-  const [markets, setMarkets] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Fetch markets once (needed to map token mints to market info)
-  useEffect(() => {
-    let mounted = true;
-
-    async function loadMarkets() {
-      try {
-        const data = await getMarketsForApp({ limit: 200 });
-        if (mounted) {
-          setMarkets(data);
-        }
-      } catch (err) {
-        console.error('[useOnChainPositions] Failed to load markets:', err);
-      }
-    }
-
-    loadMarkets();
-    return () => { mounted = false; };
-  }, []);
-
-  // Fetch positions when wallet or markets change
+  // Fetch positions from chain + DFlow API
   const fetchPositions = useCallback(async () => {
-    if (!walletAddress || markets.length === 0) {
+    console.log('[DEBUG-HISTORY] useOnChainPositions.fetchPositions called');
+    console.log('[DEBUG-HISTORY] walletAddress received:', walletAddress);
+
+    if (!walletAddress) {
+      console.log('[DEBUG-HISTORY] NO wallet address - clearing positions');
       setPositions([]);
       return;
     }
@@ -45,20 +29,40 @@ export function useOnChainPositions(walletAddress) {
     setError(null);
 
     try {
-      const onChainPositions = await fetchUserPositionsOnChain(walletAddress, markets);
+      console.log('[DEBUG-HISTORY] Calling fetchUserPositionsOnChain with:', walletAddress);
+      const onChainPositions = await fetchUserPositionsOnChain(walletAddress);
+      console.log('[DEBUG-HISTORY] fetchUserPositionsOnChain returned:', onChainPositions.length, 'positions');
 
       // Transform to match the bet format used in HistoryPage
-      const transformedPositions = onChainPositions.map(pos => ({
-        market: pos.market,
-        choice: pos.choice,
-        amount: pos.amount,
-        // On-chain positions don't have these fields, but we can compute some
-        profit: ((pos.choice === 'yes' ? pos.market.yesProfit : pos.market.noProfit) * pos.amount).toFixed(2),
-        timestamp: Date.now(), // We don't know the actual timestamp from on-chain
-        status: 'pending', // Active positions are pending
-        tokenMint: pos.tokenMint,
-        isOnChain: true, // Flag to indicate this came from on-chain
-      }));
+      const transformedPositions = onChainPositions.map(pos => {
+        const tokenCount = pos.amount;
+        const currentPrice = pos.choice === 'yes' ? pos.market.yesPrice : pos.market.noPrice;
+
+        // At Risk = current market value of tokens = tokenCount * currentPrice
+        // Potential Profit = payout if win - current value = tokenCount * (1 - currentPrice)
+        const atRisk = tokenCount * currentPrice;
+        const potentialProfit = tokenCount * (1 - currentPrice);
+
+        console.log('[DEBUG-CALC] Position:', pos.market.id);
+        console.log('[DEBUG-CALC]   choice:', pos.choice);
+        console.log('[DEBUG-CALC]   tokenCount:', tokenCount);
+        console.log('[DEBUG-CALC]   currentPrice:', currentPrice);
+        console.log('[DEBUG-CALC]   atRisk (tokenCount * price):', atRisk.toFixed(2));
+        console.log('[DEBUG-CALC]   potentialProfit (tokenCount * (1-price)):', potentialProfit.toFixed(2));
+
+        return {
+          market: pos.market,
+          choice: pos.choice,
+          amount: atRisk, // Amount at risk = current value of position
+          profit: potentialProfit.toFixed(2), // Potential profit if position wins
+          tokenCount: tokenCount, // Keep raw token count for display
+          timestamp: Date.now(),
+          status: 'pending',
+          tokenMint: pos.tokenMint,
+          tokenAccount: pos.tokenAccount,
+          isOnChain: true,
+        };
+      });
 
       setPositions(transformedPositions);
       console.log('[useOnChainPositions] Found', transformedPositions.length, 'positions');
@@ -68,9 +72,9 @@ export function useOnChainPositions(walletAddress) {
     } finally {
       setIsLoading(false);
     }
-  }, [walletAddress, markets]);
+  }, [walletAddress]);
 
-  // Auto-fetch when dependencies change
+  // Auto-fetch when wallet changes
   useEffect(() => {
     fetchPositions();
   }, [fetchPositions]);

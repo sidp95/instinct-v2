@@ -7,6 +7,7 @@ import SwipeCard from '../components/SwipeCard';
 import Timer from '../components/Timer';
 import Header from '../components/Header';
 import CategoryFilter from '../components/CategoryFilter';
+import LogoutButton from '../components/LogoutButton';
 import { getMarketsForApp, placeBet } from '../services/dflow';
 import { useToast } from '../context/ToastContext';
 import { useTheme } from '../context/ThemeContext';
@@ -56,47 +57,6 @@ function ThemeToggleButton({ isDark, onToggle, colors }) {
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
         </svg>
       )}
-    </button>
-  );
-}
-
-// Logout button component
-function LogoutButton({ onLogout, colors }) {
-  return (
-    <button
-      onClick={onLogout}
-      style={{
-        position: 'absolute',
-        top: '16px',
-        right: '16px',
-        width: '40px',
-        height: '40px',
-        borderRadius: '50%',
-        backgroundColor: colors.paper,
-        border: `3px solid ${colors.border}`,
-        boxShadow: `2px 2px 0 ${colors.border}`,
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 100,
-      }}
-      title="Logout"
-    >
-      <svg
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke={colors.text}
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-        <polyline points="16 17 21 12 16 7" />
-        <line x1="21" y1="12" x2="9" y2="12" />
-      </svg>
     </button>
   );
 }
@@ -406,7 +366,7 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
     return (
       <div className="flex flex-col h-full pb-20">
         <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
-        <LogoutButton onLogout={() => handleLogOut()} colors={colors} />
+        <LogoutButton />
         <Header />
 
         {/* Show category filter so user can adjust */}
@@ -461,7 +421,7 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
   return (
     <div className="flex flex-col h-full pb-20" style={{ position: 'relative', overflowX: 'hidden', touchAction: 'pan-y' }}>
       <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
-      <LogoutButton onLogout={() => handleLogOut()} colors={colors} />
+      <LogoutButton />
       <Header />
 
       {/* Category Filter */}

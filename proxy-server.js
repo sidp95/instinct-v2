@@ -6,6 +6,7 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 const DFLOW_API_KEY = process.env.DFLOW_API_KEY;
 const MARKETS_API_BASE = 'https://c.prediction-markets-api.dflow.net/api/v1';
@@ -192,6 +193,64 @@ app.get('/api/get-working-market', async (req, res) => {
       totalEventsChecked: data.events?.length || 0
     });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Filter prediction market outcome mints from a list of addresses
+app.post('/api/filter-mints', async (req, res) => {
+  try {
+    const { addresses } = req.body;
+
+    if (!addresses || !Array.isArray(addresses)) {
+      return res.status(400).json({ error: 'addresses array required' });
+    }
+
+    console.log('[Proxy] Filtering', addresses.length, 'mints for prediction markets');
+
+    const response = await fetch(`${MARKETS_API_BASE}/filter_outcome_mints`, {
+      method: 'POST',
+      headers: {
+        ...getHeaders(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ addresses })
+    });
+
+    const data = await response.json();
+    console.log('[Proxy] Found', data.outcomeMints?.length || 0, 'prediction market mints');
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[Proxy] filter-mints error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get market details from mint addresses
+app.post('/api/markets-batch', async (req, res) => {
+  try {
+    const { mints } = req.body;
+
+    if (!mints || !Array.isArray(mints)) {
+      return res.status(400).json({ error: 'mints array required' });
+    }
+
+    console.log('[Proxy] Fetching market details for', mints.length, 'mints');
+
+    const response = await fetch(`${MARKETS_API_BASE}/markets/batch`, {
+      method: 'POST',
+      headers: {
+        ...getHeaders(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ mints })
+    });
+
+    const data = await response.json();
+    console.log('[Proxy] Got', data.markets?.length || 0, 'markets');
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[Proxy] markets-batch error:', error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -12,28 +12,36 @@ const MAX_EXPIRY_HOURS = 24;
  * @param {number} options.limit - Number of events to fetch
  * @returns {Promise<Array>} Array of markets with token mint addresses
  */
-export async function fetchActiveMarkets({ limit = 100 } = {}) {
+// 15-minute crypto market series tickers
+const CRYPTO_15M_SERIES = 'KXSOL15M,KXBTC15M,KXETH15M';
+
+export async function fetchActiveMarkets({ limit = 100, include15MinCrypto = true } = {}) {
+  console.log('[DEBUG-MARKETS] fetchActiveMarkets called with:', { limit, include15MinCrypto });
+
   // Use proxy to avoid CORS (local proxy in dev, Vercel serverless in prod)
   const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
   const baseUrl = isDev
     ? 'http://localhost:3001/api/markets'
     : '/api/markets';
 
+  console.log('[DEBUG-MARKETS] Using baseUrl:', baseUrl);
+
   try {
-    const url = `${baseUrl}?withNestedMarkets=true&status=active&limit=${limit}`;
-    console.log('[DFlow] Fetching markets from:', url);
+    // Fetch regular markets
+    const regularUrl = `${baseUrl}?withNestedMarkets=true&status=active&limit=${limit}`;
+    console.log('[DFlow] Fetching regular markets from:', regularUrl);
 
-    const response = await fetch(url);
+    const regularResponse = await fetch(regularUrl);
+    let allMarkets = [];
 
-    if (response.ok) {
-      const data = await response.json();
+    if (regularResponse.ok) {
+      const data = await regularResponse.json();
 
-      // Flatten events into markets, preserving the accounts field
-      const markets = [];
+      // Flatten events into markets
       for (const event of (data.events || [])) {
         if (event.markets) {
           for (const market of event.markets) {
-            markets.push({
+            allMarkets.push({
               ...market,
               eventTicker: event.ticker,
               eventTitle: event.title,
@@ -42,9 +50,63 @@ export async function fetchActiveMarkets({ limit = 100 } = {}) {
           }
         }
       }
+      console.log('[DFlow] Regular markets:', allMarkets.length);
+    }
 
-      console.log('[DFlow] Total markets from events:', markets.length);
-      return markets;
+    // Fetch 15-minute crypto markets separately (different series tickers)
+    console.log('[DEBUG-CRYPTO15M] include15MinCrypto flag:', include15MinCrypto);
+    if (include15MinCrypto) {
+      console.log('[DEBUG-CRYPTO15M] ========================================');
+      console.log('[DEBUG-CRYPTO15M] Fetching 15-minute crypto markets');
+      console.log('[DEBUG-CRYPTO15M] Series tickers:', CRYPTO_15M_SERIES);
+
+      try {
+        const crypto15mUrl = `${baseUrl}?withNestedMarkets=true&seriesTickers=${CRYPTO_15M_SERIES}&status=active&limit=20`;
+        console.log('[DEBUG-CRYPTO15M] Full URL:', crypto15mUrl);
+
+        const crypto15mResponse = await fetch(crypto15mUrl);
+        console.log('[DEBUG-CRYPTO15M] Response status:', crypto15mResponse.status);
+
+        if (crypto15mResponse.ok) {
+          const crypto15mData = await crypto15mResponse.json();
+          console.log('[DEBUG-CRYPTO15M] Raw API response:', JSON.stringify(crypto15mData).substring(0, 500));
+          console.log('[DEBUG-CRYPTO15M] Events returned:', crypto15mData.events?.length || 0);
+
+          let crypto15mCount = 0;
+          for (const event of (crypto15mData.events || [])) {
+            console.log('[DEBUG-CRYPTO15M] Event:', event.ticker, 'markets:', event.markets?.length || 0);
+            if (event.markets) {
+              for (const market of event.markets) {
+                console.log('[DEBUG-CRYPTO15M] Market found:', market.ticker, '-', market.title?.substring(0, 50));
+                // Mark these as 15-min markets
+                allMarkets.push({
+                  ...market,
+                  eventTicker: event.ticker,
+                  eventTitle: event.title,
+                  imageUrl: event.imageUrl,
+                  is15MinMarket: true,
+                });
+                crypto15mCount++;
+              }
+            }
+          }
+          console.log('[DEBUG-CRYPTO15M] Total 15-min crypto markets added:', crypto15mCount);
+          console.log('[DEBUG-CRYPTO15M] Total markets now:', allMarkets.length);
+        } else {
+          const errorText = await crypto15mResponse.text();
+          console.log('[DEBUG-CRYPTO15M] API FAILED:', crypto15mResponse.status, errorText);
+        }
+      } catch (e) {
+        console.log('[DEBUG-CRYPTO15M] Fetch EXCEPTION:', e.message);
+      }
+      console.log('[DEBUG-CRYPTO15M] ========================================');
+    }
+
+    console.log('[DEBUG-MARKETS] Final allMarkets count before return:', allMarkets.length);
+    console.log('[DEBUG-MARKETS] Markets with is15MinMarket flag:', allMarkets.filter(m => m.is15MinMarket).length);
+
+    if (allMarkets.length > 0) {
+      return allMarkets;
     }
   } catch (e) {
     console.log('[DFlow] Events endpoint failed:', e.message);
@@ -340,7 +402,8 @@ function interleaveByCategory(markets) {
  * @returns {Promise<Array>} Array of transformed markets
  */
 export async function getMarketsForApp({ limit = 100 } = {}) {
-  const rawMarkets = await fetchActiveMarkets({ limit });
+  console.log('[DEBUG-MARKETS] getMarketsForApp called, fetching with include15MinCrypto=true');
+  const rawMarkets = await fetchActiveMarkets({ limit, include15MinCrypto: true });
 
   console.log('[DFlow] Raw markets count:', rawMarkets.length);
 
@@ -392,10 +455,23 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
       return false;
     }
 
-    // Binary filter: title must start with "Will" (YES/NO question)
+    // Binary filter: title must be a YES/NO question
+    // Allow: "Will X?" and "X price up in next 15 mins?" patterns
     const titleLower = (m.title || '').toLowerCase().trim();
-    if (!titleLower.startsWith('will ')) {
-      if (isCrypto) console.log('[DFlow] Crypto market filtered (no "Will" prefix):', m.ticker, m.title?.substring(0, 50));
+    const isWillQuestion = titleLower.startsWith('will ');
+    const is15MinQuestion = titleLower.includes('price up in next 15 mins') || titleLower.includes('price down in next 15 mins');
+
+    // DEBUG: Log 15-min market title pattern check
+    if (m.is15MinMarket) {
+      console.log('[DEBUG-CRYPTO15M] Title filter check for:', m.ticker);
+      console.log('[DEBUG-CRYPTO15M]   title:', m.title);
+      console.log('[DEBUG-CRYPTO15M]   isWillQuestion:', isWillQuestion);
+      console.log('[DEBUG-CRYPTO15M]   is15MinQuestion:', is15MinQuestion);
+      console.log('[DEBUG-CRYPTO15M]   PASSES:', isWillQuestion || is15MinQuestion);
+    }
+
+    if (!isWillQuestion && !is15MinQuestion) {
+      if (isCrypto) console.log('[DFlow] Crypto market filtered (not a binary question):', m.ticker, m.title?.substring(0, 50));
       return false;
     }
 
@@ -473,77 +549,206 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
  * @returns {Promise<Object>} Order response with transaction data
  */
 /**
- * Fetch user's prediction market positions from on-chain token balances
- * This is the source of truth - positions are SPL tokens on Solana
+ * Fetch user's prediction market positions using DFlow API
+ * Step 1: Get user's token accounts from Solana
+ * Step 2: Filter for prediction market tokens via DFlow API
+ * Step 3: Get market details for those tokens
  * @param {string} userPublicKey - User's Solana wallet address
- * @param {Array} markets - Array of market objects with yesMint/noMint
  * @returns {Promise<Array>} Array of positions with market info and amounts
  */
-export async function fetchUserPositionsOnChain(userPublicKey, markets) {
-  if (!userPublicKey || !markets || markets.length === 0) {
+export async function fetchUserPositionsOnChain(userPublicKey) {
+  if (!userPublicKey) {
+    console.log('[DEBUG-HISTORY] fetchUserPositionsOnChain called with NO wallet address');
     return [];
   }
 
   const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
 
+  // Use proxy for DFlow API calls
+  const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  const proxyBase = isDev ? 'http://localhost:3001' : '';
+
   try {
-    console.log('[DFlow] Fetching on-chain positions for:', userPublicKey);
+    console.log('[DEBUG-HISTORY] ========================================');
+    console.log('[DEBUG-HISTORY] fetchUserPositionsOnChain STARTING');
+    console.log('[DEBUG-HISTORY] Wallet address being queried:', userPublicKey);
+    console.log('[DEBUG-HISTORY] Proxy base URL:', proxyBase);
 
-    // Fetch all token accounts for the user
-    const response = await fetch(HELIUS_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'getTokenAccountsByOwner',
-        params: [
-          userPublicKey,
-          { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
-          { encoding: 'jsonParsed' }
-        ]
+    // Step 1: Fetch all token accounts for the user (both Token Program and Token-2022)
+    const [tokenResponse, token2022Response] = await Promise.all([
+      fetch(HELIUS_RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getTokenAccountsByOwner',
+          params: [
+            userPublicKey,
+            { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
+            { encoding: 'jsonParsed' }
+          ]
+        })
+      }),
+      fetch(HELIUS_RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'getTokenAccountsByOwner',
+          params: [
+            userPublicKey,
+            { programId: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb' }, // Token-2022
+            { encoding: 'jsonParsed' }
+          ]
+        })
       })
-    });
+    ]);
 
-    const data = await response.json();
-    if (!data.result?.value) {
-      console.log('[DFlow] No token accounts found');
+    const tokenData = await tokenResponse.json();
+    const token2022Data = await token2022Response.json();
+
+    const allAccounts = [
+      ...(tokenData.result?.value || []),
+      ...(token2022Data.result?.value || [])
+    ];
+
+    console.log('[DEBUG-HISTORY] Token Program accounts:', tokenData.result?.value?.length || 0);
+    console.log('[DEBUG-HISTORY] Token-2022 accounts:', token2022Data.result?.value?.length || 0);
+    console.log('[DEBUG-HISTORY] Total token accounts found:', allAccounts.length);
+
+    if (allAccounts.length === 0) {
+      console.log('[DEBUG-HISTORY] NO token accounts found for this wallet');
       return [];
     }
 
-    // Build a map of mint -> market info for quick lookup
-    const mintToMarket = new Map();
-    for (const market of markets) {
-      if (market.yesMint) {
-        mintToMarket.set(market.yesMint, { market, side: 'yes' });
-      }
-      if (market.noMint) {
-        mintToMarket.set(market.noMint, { market, side: 'no' });
-      }
-    }
-
-    // Find positions (token accounts that match our prediction market mints)
-    const positions = [];
-    for (const account of data.result.value) {
+    // Extract mints with non-zero balances
+    const mintBalances = new Map();
+    for (const account of allAccounts) {
       const parsed = account.account?.data?.parsed?.info;
       if (!parsed) continue;
 
       const mint = parsed.mint;
       const amount = parseFloat(parsed.tokenAmount?.uiAmount || 0);
 
-      if (amount > 0 && mintToMarket.has(mint)) {
-        const { market, side } = mintToMarket.get(mint);
-        positions.push({
-          market,
-          choice: side,
-          amount: amount, // This is the number of outcome tokens
-          tokenMint: mint,
+      if (amount > 0) {
+        mintBalances.set(mint, {
+          amount,
           tokenAccount: account.pubkey,
         });
       }
     }
 
-    console.log('[DFlow] Found', positions.length, 'on-chain positions');
+    if (mintBalances.size === 0) {
+      console.log('[DEBUG-HISTORY] No non-zero token balances found');
+      return [];
+    }
+
+    console.log('[DEBUG-HISTORY] Tokens with non-zero balances:', mintBalances.size);
+    console.log('[DEBUG-HISTORY] All mint addresses:', Array.from(mintBalances.keys()));
+
+    // Step 2: Filter for prediction market tokens via DFlow API
+    const allMints = Array.from(mintBalances.keys());
+    console.log('[DEBUG-HISTORY] Calling filter_outcome_mints with', allMints.length, 'mints');
+
+    const filterResponse = await fetch(`${proxyBase}/api/filter-mints`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ addresses: allMints })
+    });
+
+    console.log('[DEBUG-HISTORY] filter_outcome_mints response status:', filterResponse.status);
+
+    if (!filterResponse.ok) {
+      const errorText = await filterResponse.text();
+      console.log('[DEBUG-HISTORY] filter_outcome_mints FAILED:', filterResponse.status, errorText);
+      return [];
+    }
+
+    const filterData = await filterResponse.json();
+    const outcomeMints = filterData.outcomeMints || [];
+
+    console.log('[DEBUG-HISTORY] filter_outcome_mints raw response:', JSON.stringify(filterData));
+    console.log('[DEBUG-HISTORY] Prediction market tokens found:', outcomeMints.length);
+    console.log('[DEBUG-HISTORY] Outcome mint addresses:', outcomeMints);
+
+    if (outcomeMints.length === 0) {
+      console.log('[DEBUG-HISTORY] NO prediction market tokens found in wallet');
+      return [];
+    }
+
+    // Step 3: Get market details for those mints
+    console.log('[DEBUG-HISTORY] Calling markets/batch with mints:', outcomeMints);
+
+    const marketsResponse = await fetch(`${proxyBase}/api/markets-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mints: outcomeMints })
+    });
+
+    console.log('[DEBUG-HISTORY] markets/batch response status:', marketsResponse.status);
+
+    if (!marketsResponse.ok) {
+      const errorText = await marketsResponse.text();
+      console.log('[DEBUG-HISTORY] markets/batch FAILED:', marketsResponse.status, errorText);
+      return [];
+    }
+
+    const marketsData = await marketsResponse.json();
+    const markets = marketsData.markets || [];
+
+    console.log('[DEBUG-HISTORY] markets/batch raw response:', JSON.stringify(marketsData).substring(0, 500));
+    console.log('[DEBUG-HISTORY] Markets returned:', markets.length);
+    console.log('[DEBUG-HISTORY] Market tickers:', markets.map(m => m.ticker));
+
+    // Build positions from markets
+    const positions = [];
+    for (const market of markets) {
+      const usdcAccount = market.accounts?.[USDC_MINT];
+      console.log('[DEBUG-HISTORY] Processing market:', market.ticker, 'hasUSDC:', !!usdcAccount);
+
+      if (!usdcAccount) {
+        console.log('[DEBUG-HISTORY] Skipping market (no USDC account):', market.ticker);
+        continue;
+      }
+
+      // Check if user has YES tokens
+      if (usdcAccount.yesMint && mintBalances.has(usdcAccount.yesMint)) {
+        const balance = mintBalances.get(usdcAccount.yesMint);
+        console.log('[DEBUG-HISTORY] User has YES position in', market.ticker, '- amount:', balance.amount);
+        positions.push({
+          market: transformMarket(market),
+          choice: 'yes',
+          amount: balance.amount,
+          tokenMint: usdcAccount.yesMint,
+          tokenAccount: balance.tokenAccount,
+          isOnChain: true,
+        });
+      }
+
+      // Check if user has NO tokens
+      if (usdcAccount.noMint && mintBalances.has(usdcAccount.noMint)) {
+        const balance = mintBalances.get(usdcAccount.noMint);
+        console.log('[DEBUG-HISTORY] User has NO position in', market.ticker, '- amount:', balance.amount);
+        positions.push({
+          market: transformMarket(market),
+          choice: 'no',
+          amount: balance.amount,
+          tokenMint: usdcAccount.noMint,
+          tokenAccount: balance.tokenAccount,
+          isOnChain: true,
+        });
+      }
+    }
+
+    console.log('[DEBUG-HISTORY] ========================================');
+    console.log('[DEBUG-HISTORY] FINAL: Found', positions.length, 'on-chain positions');
+    console.log('[DEBUG-HISTORY] Position details:', positions.map(p => ({
+      market: p.market.title?.substring(0, 30),
+      choice: p.choice,
+      amount: p.amount,
+    })));
     return positions;
   } catch (error) {
     console.error('[DFlow] Failed to fetch on-chain positions:', error);

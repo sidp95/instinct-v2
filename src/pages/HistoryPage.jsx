@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { categoryColors } from '../data/markets';
 import { useTheme } from '../context/ThemeContext';
+import LogoutButton from '../components/LogoutButton';
 
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Weather', 'Stocks', 'Commodities'];
 const SORT_OPTIONS = [
@@ -80,9 +81,16 @@ function OpenPositionCard({ bet, colors }) {
         >
           {bet.choice.toUpperCase()}
         </span>
-        <span className="font-bold text-lg" style={{ color: colors.text }}>
-          ${bet.amount}
-        </span>
+        <div>
+          <span className="font-bold text-lg" style={{ color: colors.text }}>
+            ${parseFloat(bet.amount).toFixed(2)}
+          </span>
+          {bet.tokenCount && (
+            <span className="text-xs ml-2" style={{ color: colors.textMuted }}>
+              ({bet.tokenCount} tokens)
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Time to resolution | Potential profit row */}
@@ -94,7 +102,7 @@ function OpenPositionCard({ bet, colors }) {
           <span className="text-sm font-bold" style={{ color: colors.textSecondary }}>{timeDisplay}</span>
         </div>
         <div className="text-right">
-          <span className="font-bold text-green-600 text-lg">+${bet.profit}</span>
+          <span className="font-bold text-green-600 text-lg">+${parseFloat(bet.profit).toFixed(2)}</span>
         </div>
       </div>
     </motion.div>
@@ -373,7 +381,8 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
   }, [closedPositions, selectedCategory, sortBy]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" style={{ position: 'relative' }}>
+      <LogoutButton />
       {/* Header */}
       <header
         className="px-4 py-4 border-b-3"
@@ -535,7 +544,7 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
 
                   {/* Position cards */}
                   {filteredOpen.map((bet) => (
-                    <OpenPositionCard key={`${bet.market.id}-${bet.timestamp}`} bet={bet} colors={colors} />
+                    <OpenPositionCard key={`${bet.market.id}-${bet.choice}-${bet.timestamp}`} bet={bet} colors={colors} />
                   ))}
                 </>
               )}
@@ -614,7 +623,7 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
 
                   {/* Position cards */}
                   {filteredClosed.map((bet) => (
-                    <ClosedPositionCard key={`${bet.market.id}-${bet.timestamp}`} bet={bet} colors={colors} />
+                    <ClosedPositionCard key={`${bet.market.id}-${bet.choice}-${bet.timestamp}`} bet={bet} colors={colors} />
                   ))}
                 </>
               )}
