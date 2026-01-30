@@ -488,14 +488,22 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
     keyUsed: currentMarket?.id || currentMarket?.ticker || currentIndex
   });
 
+  // Calculate available height for card (total height minus fixed elements)
+  // Header: 56px, Filter: ~44px, Timer: ~30px, Bottom section: ~90px, Nav: 80px, Padding: ~30px
+  // Total fixed: ~330px, leaving card area
+  const cardMaxHeight = 'calc(100dvh - 330px)';
+  const cardMaxHeightFallback = 'calc(100vh - 330px)';
+
   return (
     <div
       className="flex flex-col"
       style={{
         position: 'relative',
         overflowX: 'hidden',
+        overflowY: 'hidden',
         touchAction: 'pan-y',
-        height: 'calc(100vh - 80px)', // Account for bottom nav
+        height: 'calc(100dvh - 80px)', // Use dvh for mobile browser chrome
+        maxHeight: 'calc(100vh - 80px)', // Fallback for older browsers
       }}
     >
       <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
@@ -504,14 +512,14 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
       {/* Top section - fixed height with consistent spacing */}
       <div style={{ flexShrink: 0 }}>
         <Header />
-        <div style={{ padding: '12px 16px 8px 16px' }}>
+        <div style={{ padding: '8px 16px 4px 16px' }}>
           <CategoryFilter
             selectedCategories={selectedCategories}
             onToggle={handleCategoryToggle}
             availableCategories={availableCategories}
           />
         </div>
-        <div style={{ padding: '0 16px 12px 16px' }}>
+        <div style={{ padding: '0 16px 8px 16px' }}>
           <Timer
             resetKey={currentIndex}
             onComplete={handleTimerComplete}
@@ -519,17 +527,25 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         </div>
       </div>
 
-      {/* Card Stack Section - fills available space */}
+      {/* Card Stack Section - constrained height */}
       <div
-        className="flex-1 px-4 min-h-0"
+        className="px-4"
         style={{
+          flex: '1 1 auto',
+          minHeight: 0,
+          maxHeight: cardMaxHeight,
           display: 'flex',
           flexDirection: 'column',
         }}
       >
         <div
-          className="w-full max-w-md mx-auto flex-1"
-          style={{ minHeight: 0, position: 'relative' }}
+          className="w-full max-w-md mx-auto"
+          style={{
+            flex: '1 1 auto',
+            minHeight: '200px',
+            maxHeight: '100%',
+            position: 'relative',
+          }}
         >
           {/* Background card */}
           {nextMarket && (
@@ -554,9 +570,9 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         </div>
       </div>
 
-      {/* Bottom section - anchored to bottom */}
+      {/* Bottom section - ALWAYS visible, anchored to bottom */}
       <div
-        className="px-4 pt-2 pb-2"
+        className="px-4 pt-2 pb-3"
         style={{
           flexShrink: 0,
           backgroundColor: colors.background,
@@ -579,7 +595,7 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={() => handleButtonClick('no')}
-            className="flex-1 py-3 border-3 rounded-comic font-bold text-base active:shadow-none active:translate-x-1 active:translate-y-1 transition-all"
+            className="flex-1 py-2.5 border-3 rounded-comic font-bold text-sm active:shadow-none active:translate-x-1 active:translate-y-1 transition-all"
             style={{
               backgroundColor: isDark ? '#4a2020' : '#fee2e2',
               borderColor: colors.border,
@@ -592,7 +608,7 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={() => handleButtonClick('yes')}
-            className="flex-1 py-3 border-3 rounded-comic font-bold text-base active:shadow-none active:translate-x-1 active:translate-y-1 transition-all"
+            className="flex-1 py-2.5 border-3 rounded-comic font-bold text-sm active:shadow-none active:translate-x-1 active:translate-y-1 transition-all"
             style={{
               backgroundColor: isDark ? '#1a3a20' : '#dcfce7',
               borderColor: colors.border,
