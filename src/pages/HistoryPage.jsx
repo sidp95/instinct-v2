@@ -296,6 +296,22 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
   const [sortBy, setSortBy] = useState('newest');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Debug: Log bets received from parent
+  console.log('[HistoryPage] ========================================');
+  console.log('[HistoryPage] Bets received:', bets?.length || 0);
+  console.log('[HistoryPage] isLoadingPositions:', isLoadingPositions);
+  if (bets && bets.length > 0) {
+    console.log('[HistoryPage] First bet:', JSON.stringify(bets[0], null, 2));
+    console.log('[HistoryPage] All bets:', bets.map(b => ({
+      id: b.market?.id,
+      title: b.market?.title?.substring(0, 30),
+      amount: b.amount,
+      profit: b.profit,
+      status: b.status,
+      isOnChain: b.isOnChain,
+    })));
+  }
+
   // Refresh positions from on-chain
   const handleRefresh = async () => {
     if (isRefreshing || isLoadingPositions) return;

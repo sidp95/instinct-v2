@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { categoryColors } from '../data/markets';
 import { useTheme } from '../context/ThemeContext';
 import { playSwipeSound, unlockAudio } from '../utils/sounds';
+
+// Global flag to track if we've set up touch listener
+let touchListenerAdded = false;
 
 function formatTimeUntil(expirationTime) {
   if (!expirationTime) return null;
@@ -21,6 +24,28 @@ function formatTimeUntil(expirationTime) {
 export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit }) {
   const [imageError, setImageError] = useState(false);
   const { colors, isDark } = useTheme();
+
+  // Set up early audio unlock on any touch/click
+  useEffect(() => {
+    if (touchListenerAdded) return;
+
+    const handleFirstInteraction = () => {
+      console.log('[SwipeCard] First interaction detected, unlocking audio...');
+      unlockAudio();
+      // Remove listeners after first interaction
+      document.removeEventListener('touchstart', handleFirstInteraction);
+      document.removeEventListener('mousedown', handleFirstInteraction);
+    };
+
+    document.addEventListener('touchstart', handleFirstInteraction, { once: true });
+    document.addEventListener('mousedown', handleFirstInteraction, { once: true });
+    touchListenerAdded = true;
+
+    return () => {
+      document.removeEventListener('touchstart', handleFirstInteraction);
+      document.removeEventListener('mousedown', handleFirstInteraction);
+    };
+  }, []);
 
   // Framer motion values for drag
   const x = useMotionValue(0);

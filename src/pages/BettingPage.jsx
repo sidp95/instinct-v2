@@ -12,7 +12,7 @@ import { getMarketsForApp, placeBet } from '../services/dflow';
 import { useToast } from '../context/ToastContext';
 import { useTheme } from '../context/ThemeContext';
 import { useMarketHistory } from '../hooks/useMarketHistory';
-import { playSwipeSound } from '../utils/sounds';
+import { playSwipeSound, unlockAudio } from '../utils/sounds';
 
 const SOLANA_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -367,6 +367,7 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
   }, [warning, currentMarket, addToHistory]);
 
   const handleButtonClick = (choice) => {
+    unlockAudio(); // Ensure audio is unlocked on button tap (iOS)
     playSwipeSound();
     handleSwipe(choice);
   };
@@ -488,22 +489,25 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
     keyUsed: currentMarket?.id || currentMarket?.ticker || currentIndex
   });
 
-  // Calculate available height for card (total height minus fixed elements)
-  // Header: 56px, Filter: ~44px, Timer: ~30px, Bottom section: ~90px, Nav: 80px, Padding: ~30px
-  // Total fixed: ~330px, leaving card area
+  // Calculate available height for card
+  // Using fixed positioning to avoid parent padding issues
   const cardMaxHeight = 'calc(100dvh - 330px)';
-  const cardMaxHeightFallback = 'calc(100vh - 330px)';
 
   return (
     <div
       className="flex flex-col"
       style={{
-        position: 'relative',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: '80px', // Space for bottom navigation
         overflowX: 'hidden',
         overflowY: 'hidden',
         touchAction: 'pan-y',
-        height: 'calc(100dvh - 80px)', // Use dvh for mobile browser chrome
-        maxHeight: 'calc(100vh - 80px)', // Fallback for older browsers
+        backgroundColor: colors.background,
+        maxWidth: '480px',
+        margin: '0 auto',
       }}
     >
       <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />

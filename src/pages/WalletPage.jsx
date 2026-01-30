@@ -61,11 +61,28 @@ async function fetchTransactionHistory(walletAddress) {
     console.log('[DEBUG-WALLET] Helius API URL:', url);
 
     const response = await fetch(url);
-    const transactions = await response.json();
+    const responseData = await response.json();
 
     console.log('[DEBUG-WALLET] Helius API response status:', response.status);
-    console.log('[DEBUG-WALLET] Number of transactions returned:', transactions.length);
-    console.log('[DEBUG-WALLET] Raw transactions:', JSON.stringify(transactions.slice(0, 2), null, 2));
+    console.log('[DEBUG-WALLET] Response type:', typeof responseData, Array.isArray(responseData) ? 'is array' : 'not array');
+    console.log('[DEBUG-WALLET] Response data:', JSON.stringify(responseData).substring(0, 500));
+
+    // Handle error responses from Helius
+    if (!response.ok || responseData.error) {
+      console.error('[DEBUG-WALLET] Helius API error:', responseData.error || response.statusText);
+      return [];
+    }
+
+    // Ensure we have an array
+    const transactions = Array.isArray(responseData) ? responseData : [];
+    console.log('[DEBUG-WALLET] Number of transactions:', transactions.length);
+
+    if (transactions.length === 0) {
+      console.log('[DEBUG-WALLET] No transactions found for this wallet');
+      return [];
+    }
+
+    console.log('[DEBUG-WALLET] First transaction:', JSON.stringify(transactions[0], null, 2).substring(0, 500));
 
     // DFlow prediction market program IDs
     const DFLOW_PROGRAMS = [
