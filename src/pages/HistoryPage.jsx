@@ -591,7 +591,7 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
                         <div className="text-2xl font-bold" style={{ color: colors.text }}>
                           ${filteredOpen.reduce((sum, b) => sum + parseFloat(b.amount), 0).toFixed(2)}
                         </div>
-                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>At Risk</div>
+                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Value</div>
                       </div>
                       <div className="w-px" style={{ backgroundColor: colors.backgroundSecondary }} />
                       <div>

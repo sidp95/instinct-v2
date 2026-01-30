@@ -69,19 +69,20 @@ export function useOnChainPositions(walletAddress) {
         const tokenCount = pos.amount;
         const currentPrice = pos.choice === 'yes' ? pos.market.yesPrice : pos.market.noPrice;
 
-        // At Risk = current market value of tokens = tokenCount * currentPrice
+        // Current Value = tokenCount * currentPrice (what position is worth NOW if sold)
+        // Note: This is NOT cost basis (what user paid) - we don't have that data
         // Potential Profit = payout if win - current value = tokenCount * (1 - currentPrice)
-        const atRisk = tokenCount * currentPrice;
+        const currentValue = tokenCount * currentPrice;
         const potentialProfit = tokenCount * (1 - currentPrice);
 
         console.log('[DEBUG-CALC] Position:', pos.market.ticker || pos.market.id);
         console.log('[DEBUG-CALC]   choice:', pos.choice, '| tokens:', tokenCount, '| price:', currentPrice);
-        console.log('[DEBUG-CALC]   atRisk:', atRisk.toFixed(2), '| profit:', potentialProfit.toFixed(2));
+        console.log('[DEBUG-CALC]   currentValue:', currentValue.toFixed(2), '| potentialProfit:', potentialProfit.toFixed(2));
 
         return {
           market: pos.market,
           choice: pos.choice,
-          amount: atRisk, // Amount at risk = current value of position
+          amount: currentValue, // Current market value (NOT cost basis)
           profit: potentialProfit.toFixed(2), // Potential profit if position wins
           tokenCount: tokenCount, // Keep raw token count for display
           timestamp: Date.now(),
