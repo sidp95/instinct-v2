@@ -22,7 +22,11 @@ function MainApp({ audioContext, walletAddress }) {
   // Note: localStorage bets are NOT used for history - on-chain positions are the source of truth
   // localStorage is only for tracking which markets user has seen/skipped
 
-  console.log('[DEBUG-APP] MainApp rendered with walletAddress:', walletAddress);
+  console.log('[DEBUG-APP] ============================================');
+  console.log('[DEBUG-APP] MainApp rendered');
+  console.log('[DEBUG-APP] walletAddress prop:', walletAddress);
+  console.log('[DEBUG-APP] walletAddress first 8 chars:', walletAddress?.substring(0, 8));
+  console.log('[DEBUG-APP] walletAddress last 4 chars:', walletAddress?.slice(-4));
 
   // Fetch on-chain positions (source of truth for actual holdings)
   const { positions: onChainPositions, isLoading: positionsLoading, refetch: refetchPositions } = useOnChainPositions(walletAddress);

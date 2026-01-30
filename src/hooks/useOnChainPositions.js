@@ -16,13 +16,21 @@ export function useOnChainPositions(walletAddress) {
 
   // Fetch positions from chain + DFlow API
   const fetchPositions = useCallback(async () => {
+    console.log('[DEBUG-HISTORY] ============================================');
     console.log('[DEBUG-HISTORY] useOnChainPositions.fetchPositions called');
     console.log('[DEBUG-HISTORY] walletAddress received:', walletAddress);
+    console.log('[DEBUG-HISTORY] walletAddress type:', typeof walletAddress);
+    console.log('[DEBUG-HISTORY] walletAddress length:', walletAddress?.length);
 
     if (!walletAddress) {
       console.log('[DEBUG-HISTORY] NO wallet address - clearing positions');
       setPositions([]);
       return;
+    }
+
+    // Verify this looks like a valid Solana address
+    if (walletAddress.length !== 44 && walletAddress.length !== 43) {
+      console.error('[DEBUG-HISTORY] WARNING: walletAddress length is unusual:', walletAddress.length);
     }
 
     setIsLoading(true);

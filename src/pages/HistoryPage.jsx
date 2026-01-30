@@ -345,15 +345,11 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
   console.log('[HistoryPage] Bets received:', bets?.length || 0);
   console.log('[HistoryPage] isLoadingPositions:', isLoadingPositions);
   if (bets && bets.length > 0) {
-    console.log('[HistoryPage] First bet:', JSON.stringify(bets[0], null, 2));
-    console.log('[HistoryPage] All bets:', bets.map(b => ({
-      id: b.market?.id,
-      title: b.market?.title?.substring(0, 30),
-      amount: b.amount,
-      profit: b.profit,
-      status: b.status,
-      isOnChain: b.isOnChain,
-    })));
+    console.log('[HistoryPage] All bets summary:');
+    bets.forEach((b, i) => {
+      console.log(`[HistoryPage]   ${i}: ${b.market?.ticker || b.market?.title?.substring(0, 20)} | ${b.choice} | $${b.amount?.toFixed(2)} | mint: ${b.tokenMint?.substring(0, 8)}...`);
+    });
+    console.log('[HistoryPage] Total at risk (sum):', bets.reduce((sum, b) => sum + (parseFloat(b.amount) || 0), 0).toFixed(2));
   }
 
   // Refresh positions from on-chain
