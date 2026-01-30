@@ -36,7 +36,7 @@ export default function SignInPage({ onAudioInit }) {
         style={{
           width: '80px',
           height: '80px',
-          backgroundColor: colors.border,
+          backgroundColor: '#fff',
           borderRadius: '20px',
           display: 'flex',
           alignItems: 'center',
@@ -44,9 +44,18 @@ export default function SignInPage({ onAudioInit }) {
           marginBottom: '16px',
           boxShadow: `6px 6px 0 ${colors.border}`,
           border: `4px solid ${colors.border}`,
+          padding: '8px',
         }}
       >
-        <span style={{ color: '#fff', fontSize: '48px', fontWeight: 'bold' }}>I</span>
+        <img
+          src="/logo.png"
+          alt="Instinkt"
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+          }}
+        />
       </div>
 
       {/* App Name */}
