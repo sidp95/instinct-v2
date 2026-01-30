@@ -87,9 +87,18 @@ function ArrowUpIcon() {
 function SingleToast({ toast, onDismiss }) {
   const config = toastConfig[toast.type] || toastConfig.info;
   const Icon = config.icon;
+  const isClickable = !!toast.onClick;
+
+  const handleClick = () => {
+    if (toast.onClick) {
+      toast.onClick();
+      onDismiss();
+    }
+  };
 
   return (
     <div
+      onClick={isClickable ? handleClick : undefined}
       style={{
         backgroundColor: config.bg,
         border: `3px solid ${config.border}`,
@@ -103,6 +112,7 @@ function SingleToast({ toast, onDismiss }) {
         width: '100%',
         animation: 'slideDown 0.3s ease-out',
         color: config.text,
+        cursor: isClickable ? 'pointer' : 'default',
       }}
     >
       {/* Icon */}

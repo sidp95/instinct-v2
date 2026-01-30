@@ -311,8 +311,19 @@ export function transformMarket(market, eventImages = new Map()) {
 }
 
 /**
- * Determine category from market ticker
- * @param {string} ticker - Market ticker
+ * Check if a word appears as a standalone word in text (not part of another word)
+ * @param {string} text - Text to search in
+ * @param {string} word - Word to find
+ * @returns {boolean}
+ */
+function hasStandaloneWord(text, word) {
+  const regex = new RegExp(`\\b${word}\\b`, 'i');
+  return regex.test(text);
+}
+
+/**
+ * Determine category from market ticker and title
+ * @param {Object} market - Market object with ticker and title
  * @returns {string} Category name
  */
 function getCategoryFromMarket(market) {
@@ -323,30 +334,74 @@ function getCategoryFromMarket(market) {
   if (ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL') || ticker.includes('CRYPTO')) return 'Crypto';
   if (title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana') || title.includes('crypto')) return 'Crypto';
 
-  // Sports
+  // Sports - check BEFORE tech to prioritize sports keywords
+  // Ticker-based detection
   if (ticker.includes('NFL') || ticker.includes('KXSB')) return 'Sports';
   if (ticker.includes('NBA') || ticker.includes('WNBA')) return 'Sports';
-  if (ticker.includes('NCAA') || ticker.includes('MLB')) return 'Sports';
+  if (ticker.includes('NCAA') || ticker.includes('MLB') || ticker.includes('NHL')) return 'Sports';
+  if (ticker.includes('PGA') || ticker.includes('LPGA') || ticker.includes('GOLF')) return 'Sports';
+  if (ticker.includes('MLS') || ticker.includes('FIFA')) return 'Sports';
   if (ticker.includes('BOXING') || ticker.includes('UFC') || ticker.includes('MMA')) return 'Sports';
+  if (ticker.includes('F1') || ticker.includes('NASCAR')) return 'Sports';
+
+  // Title-based detection - team sports
   if (title.includes('basketball') || title.includes('football') || title.includes('baseball')) return 'Sports';
   if (title.includes('tennis') || title.includes('boxing') || title.includes('ufc')) return 'Sports';
+
+  // Golf
+  if (title.includes('golf') || title.includes(' pga') || title.includes('lpga')) return 'Sports';
+  if (title.includes('masters') || title.includes('farmers insurance open')) return 'Sports';
+  if (title.includes('us open') && !title.includes('stock')) return 'Sports'; // US Open golf/tennis, not stock market
+
+  // Hockey
+  if (title.includes('hockey') || title.includes(' nhl') || title.includes('stanley cup')) return 'Sports';
+
+  // Soccer
+  if (title.includes('soccer') || title.includes(' mls') || title.includes('premier league')) return 'Sports';
+  if (title.includes('world cup') || title.includes('champions league')) return 'Sports';
+
+  // Racing
+  if (title.includes('formula 1') || title.includes(' f1 ') || title.includes('nascar')) return 'Sports';
+  if (title.includes('grand prix') || title.includes('racing')) return 'Sports';
+
+  // General sports patterns
+  if (title.includes('tournament') || title.includes('championship')) return 'Sports';
+  if (title.includes('playoffs') || title.includes('super bowl') || title.includes('finals')) return 'Sports';
+
+  // "Will X win the Y" pattern - often sports (tournaments, matches, etc.)
+  if (/will .+ win the .+/i.test(title)) {
+    // But exclude political wins
+    if (!title.includes('election') && !title.includes('vote') && !title.includes('president')) {
+      return 'Sports';
+    }
+  }
 
   // Finance
   if (ticker.includes('FED') || ticker.includes('RATE')) return 'Finance';
   if (title.includes('federal reserve') || title.includes('interest rate') || title.includes('rate cut') || title.includes('rate hike')) return 'Finance';
+  if (title.includes('stock market') || title.includes('s&p 500') || title.includes('dow jones') || title.includes('nasdaq')) return 'Finance';
 
   // Politics
   if (ticker.includes('PRES') || ticker.includes('GOV') || ticker.includes('MAYOR')) return 'Politics';
   if (title.includes('president') || title.includes('election') || title.includes('democrat') || title.includes('republican')) return 'Politics';
   if (title.includes('senate') || title.includes('house') || title.includes('congress') || title.includes('governor')) return 'Politics';
+  if (title.includes('vote') || title.includes('ballot') || title.includes('primary')) return 'Politics';
 
-  // Tech
-  if (ticker.includes('LLM') || ticker.includes('AI')) return 'Tech';
-  if (title.includes('ai ') || title.includes('artificial intelligence') || title.includes('chatgpt') || title.includes('openai')) return 'Tech';
+  // Tech - use standalone word matching for "AI" to avoid false positives
+  if (ticker.includes('LLM')) return 'Tech';
+  // Check for "AI" as standalone word in ticker (e.g., "KXAI" but not "FAIR")
+  if (/\bAI\b/.test(ticker)) return 'Tech';
+  // Title checks - be specific about AI
+  if (title.includes('artificial intelligence')) return 'Tech';
+  if (hasStandaloneWord(title, 'ai') || title.includes(' ai ') || title.includes(' ai?') || title.includes(' ai.')) return 'Tech';
+  if (title.includes('chatgpt') || title.includes('openai') || title.includes('llm') || title.includes('gpt-')) return 'Tech';
+  if (title.includes('machine learning') || title.includes('neural network')) return 'Tech';
 
   // Culture
   if (ticker.includes('TIME') || ticker.includes('GOOGLE')) return 'Culture';
-  if (title.includes('gta') || title.includes('game') || title.includes('movie') || title.includes('spotify')) return 'Culture';
+  if (title.includes('gta') || title.includes('video game') || title.includes('movie') || title.includes('spotify')) return 'Culture';
+  if (title.includes('album') || title.includes('grammy') || title.includes('oscar') || title.includes('emmy')) return 'Culture';
+  if (title.includes('netflix') || title.includes('disney') || title.includes('streaming')) return 'Culture';
 
   return 'Other';
 }

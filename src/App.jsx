@@ -16,7 +16,7 @@ import WalletPage from './pages/WalletPage';
 
 function MainApp({ audioContext, walletAddress }) {
   const { colors, isDark } = useTheme();
-  const [activeTab, setActiveTab] = useState('wallet'); // Default to wallet for export
+  const [activeTab, setActiveTab] = useState('bet'); // Default to betting page
   const [balance, setBalance] = useLocalStorage('instinct-balance', 100);
   const [betSize, setBetSize] = useLocalStorage('instinct-betsize', 1);
   // Note: localStorage bets are NOT used for history - on-chain positions are the source of truth

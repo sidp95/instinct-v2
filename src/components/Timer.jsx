@@ -96,68 +96,74 @@ export default function Timer({ onComplete, resetKey }) {
     };
   }, [resetKey, audioContext]);
 
-  // Calculate progress for circular indicator (clockwise from top)
+  // Calculate progress (0 to 1, where 1 is full)
   const progress = seconds / TIMER_SECONDS;
-  const circumference = 2 * Math.PI * 36;
-  // Offset increases as time decreases (ring depletes)
-  const strokeDashoffset = circumference * (1 - progress);
 
   // Determine if in warning zone
   const isWarning = seconds <= 10;
   const isUrgent = seconds <= 5;
 
-  // Breathing animation speed
-  const pulseSpeed = isUrgent ? 0.3 : 0.6;
+  // Get bar color based on state
+  const getBarColor = () => {
+    if (isUrgent) return '#EF4444';
+    if (isWarning) return '#F59E0B';
+    return isDark ? '#22c55e' : '#16a34a';
+  };
 
   return (
-    <div className="relative flex items-center justify-center">
-      {/* SVG Circle Progress - rotated to start from top (12 o'clock), scaleX(-1) for clockwise */}
-      <svg className="w-24 h-24" viewBox="0 0 80 80" style={{ transform: 'rotate(90deg) scaleX(-1)', transformOrigin: 'center' }}>
-        {/* Background circle */}
-        <circle
-          cx="40"
-          cy="40"
-          r="36"
-          stroke={isDark ? '#444' : '#D1D5DB'}
-          strokeWidth="6"
-          fill="none"
-        />
-        {/* Progress circle */}
-        <circle
-          cx="40"
-          cy="40"
-          r="36"
-          stroke={isWarning ? '#EF4444' : colors.text}
-          strokeWidth="6"
-          fill="none"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          className="transition-all duration-1000"
-        />
-      </svg>
-
-      {/* Timer text - just the number */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <span
-          className="text-3xl font-bold transition-colors duration-300"
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        width: '100%',
+      }}
+    >
+      {/* Progress bar container */}
+      <div
+        style={{
+          flex: 1,
+          height: '6px',
+          backgroundColor: isDark ? '#333' : '#e5e7eb',
+          borderRadius: '3px',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Progress bar fill */}
+        <div
           style={{
-            color: isWarning ? '#EF4444' : colors.text,
-            animation: isWarning ? `breathe ${pulseSpeed}s ease-in-out infinite` : 'none',
-            textShadow: isWarning ? '0 0 20px rgba(239, 68, 68, 0.6), 0 0 40px rgba(239, 68, 68, 0.3)' : 'none',
+            height: '100%',
+            width: `${progress * 100}%`,
+            backgroundColor: getBarColor(),
+            borderRadius: '3px',
+            transition: 'width 1s linear, background-color 0.3s ease',
           }}
-        >
-          {seconds}
-        </span>
+        />
       </div>
 
-      {/* Inline keyframes for breathing animation */}
-      <style>{`
-        @keyframes breathe {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.15); }
-        }
-      `}</style>
+      {/* Seconds display */}
+      <span
+        style={{
+          fontSize: '14px',
+          fontWeight: 'bold',
+          color: isWarning ? '#EF4444' : colors.textSecondary,
+          minWidth: '28px',
+          textAlign: 'right',
+          animation: isUrgent ? 'pulse 0.5s ease-in-out infinite' : 'none',
+        }}
+      >
+        {seconds}s
+      </span>
+
+      {/* Pulse animation for urgent state */}
+      {isUrgent && (
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+          }
+        `}</style>
+      )}
     </div>
   );
 }

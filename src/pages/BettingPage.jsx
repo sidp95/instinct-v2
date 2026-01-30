@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { isSolanaWallet } from '@dynamic-labs/solana';
-import { Connection, VersionedTransaction } from '@solana/web3.js';
+import { Connection, VersionedTransaction, PublicKey } from '@solana/web3.js';
 import SwipeCard from '../components/SwipeCard';
 import Timer from '../components/Timer';
 import Header from '../components/Header';
@@ -14,6 +14,52 @@ import { useTheme } from '../context/ThemeContext';
 import { useMarketHistory } from '../hooks/useMarketHistory';
 
 const SOLANA_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+/**
+ * Fetch USDC balance for a wallet
+ */
+async function fetchUsdcBalance(walletAddress) {
+  try {
+    const connection = new Connection(SOLANA_RPC, 'confirmed');
+    const ownerPubkey = new PublicKey(walletAddress);
+    const usdcMintPubkey = new PublicKey(USDC_MINT);
+    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(ownerPubkey, {
+      mint: usdcMintPubkey,
+    });
+    if (tokenAccounts.value.length === 0) return 0;
+    let total = 0;
+    for (const acc of tokenAccounts.value) {
+      total += acc.account.data.parsed.info.tokenAmount.uiAmount || 0;
+    }
+    return total;
+  } catch (error) {
+    console.error('[BettingPage] Error fetching USDC:', error);
+    return 0;
+  }
+}
+
+/**
+ * Convert raw API error messages to user-friendly messages
+ */
+function getFriendlyErrorMessage(error) {
+  const message = error?.message || error?.toString() || '';
+  const lowerMessage = message.toLowerCase();
+
+  if (lowerMessage.includes('route_not_found') || lowerMessage.includes('route not found')) {
+    return "This market isn't available right now. Try another one!";
+  }
+
+  if (lowerMessage.includes('no record of a prior credit') || lowerMessage.includes('debit')) {
+    return 'Insufficient funds. Please add USDC to your wallet first.';
+  }
+
+  if (lowerMessage.includes('simulation failed')) {
+    return 'Transaction failed. Please try again.';
+  }
+
+  return 'Something went wrong. Please try again.';
+}
 
 // Theme toggle button component
 function ThemeToggleButton({ isDark, onToggle, colors }) {
@@ -71,10 +117,18 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [isPlacingBet, setIsPlacingBet] = useState(false);
+  const [usdcBalance, setUsdcBalance] = useState(null);
   const { success, warning, error } = useToast();
 
   // Get wallet from Dynamic
   const walletAddress = primaryWallet?.address || null;
+
+  // Fetch USDC balance when wallet is available
+  useEffect(() => {
+    if (walletAddress) {
+      fetchUsdcBalance(walletAddress).then(setUsdcBalance);
+    }
+  }, [walletAddress]);
 
   // Market history - persists interacted markets per wallet
   const { addToHistory, filterMarkets: filterByHistory } = useMarketHistory(walletAddress);
@@ -178,11 +232,24 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
 
     // Handle YES/NO bets
     if (dir === 'yes' || dir === 'no') {
-      // Check for insufficient funds
-      if (balance < betSize) {
-        error('Not enough balance', {
-          button: 'Top up',
-          onButtonClick: goToWallet,
+      // Check for $0 USDC balance first
+      if (usdcBalance !== null && usdcBalance === 0) {
+        warning('You need USDC to place bets. Tap here to fund your wallet!', {
+          duration: 5000,
+          onClick: goToWallet,
+        });
+        // Still advance to next card
+        console.log('[BettingPage] Zero USDC balance - advancing anyway');
+        setCurrentIndex((prev) => prev + 1);
+        return;
+      }
+
+      // Check for insufficient funds (balance less than bet size but not zero)
+      const currentBalance = usdcBalance ?? balance;
+      if (currentBalance < betSize) {
+        error('Insufficient funds. Please add USDC to your wallet first.', {
+          duration: 4000,
+          onClick: goToWallet,
         });
         // Still advance to next card
         console.log('[BettingPage] Insufficient funds - advancing anyway');
@@ -279,12 +346,13 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
 
       } catch (err) {
         console.error('[BettingPage] Failed to place bet:', err);
-        error(`Bet failed: ${err.message}`, { duration: 4000 });
+        const friendlyMessage = getFriendlyErrorMessage(err);
+        error(friendlyMessage, { duration: 4000 });
         setIsPlacingBet(false);
         setCurrentIndex((prev) => prev + 1);
       }
     }
-  }, [currentMarket, betSize, onPlaceBet, balance, error, success, warning, goToWallet, walletAddress, isPlacingBet, primaryWallet, addToHistory]);
+  }, [currentMarket, betSize, onPlaceBet, balance, error, success, warning, goToWallet, walletAddress, isPlacingBet, primaryWallet, addToHistory, usdcBalance]);
 
   const handleTimerComplete = useCallback(() => {
     // Show expired toast
@@ -419,24 +487,27 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
   });
 
   return (
-    <div className="flex flex-col h-full pb-20" style={{ position: 'relative', overflowX: 'hidden', touchAction: 'pan-y' }}>
+    <div
+      className="flex flex-col"
+      style={{
+        position: 'relative',
+        overflowX: 'hidden',
+        touchAction: 'pan-y',
+        height: 'calc(100vh - 80px)', // Account for bottom nav
+      }}
+    >
       <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
       <LogoutButton />
-      <Header />
 
-      {/* Category Filter */}
-      <CategoryFilter
-        selectedCategories={selectedCategories}
-        onToggle={handleCategoryToggle}
-        availableCategories={availableCategories}
-      />
-
-      {/* Timer Section */}
-      <div className="flex justify-center py-4">
-        <div
-          className="card-comic p-3"
-          style={{ backgroundColor: colors.paper, borderColor: colors.border }}
-        >
+      {/* Top section - fixed height */}
+      <div style={{ flexShrink: 0 }}>
+        <Header />
+        <CategoryFilter
+          selectedCategories={selectedCategories}
+          onToggle={handleCategoryToggle}
+          availableCategories={availableCategories}
+        />
+        <div className="px-4 pt-1 pb-2">
           <Timer
             resetKey={currentIndex}
             onComplete={handleTimerComplete}
@@ -444,9 +515,18 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         </div>
       </div>
 
-      {/* Card Stack Section - fixed height for absolute positioning */}
-      <div className="flex-1 px-4" style={{ minHeight: '340px', overflow: 'hidden' }}>
-        <div className="relative h-full w-full max-w-md mx-auto" style={{ height: '100%', minHeight: '320px', overflow: 'hidden' }}>
+      {/* Card Stack Section - fills available space */}
+      <div
+        className="flex-1 px-4 min-h-0"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div
+          className="w-full max-w-md mx-auto flex-1"
+          style={{ minHeight: 0, position: 'relative' }}
+        >
           {/* Background card */}
           {nextMarket && (
             <SwipeCard
@@ -470,22 +550,32 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         </div>
       </div>
 
-      {/* Swipe hints - directly below card */}
-      <div className="text-center py-2 text-sm font-bold" style={{ color: colors.textMuted }}>
-        <span className="opacity-60">&larr; NO</span>
-        <span className="mx-4 opacity-60">|</span>
-        <span className="opacity-60">SKIP &uarr;</span>
-        <span className="mx-4 opacity-60">|</span>
-        <span className="opacity-60">YES &rarr;</span>
-      </div>
+      {/* Bottom section - anchored to bottom */}
+      <div
+        className="px-4 pt-2 pb-2"
+        style={{
+          flexShrink: 0,
+          backgroundColor: colors.background,
+        }}
+      >
+        {/* Swipe hints */}
+        <div
+          className="text-center text-xs font-bold mb-2"
+          style={{ color: colors.textMuted }}
+        >
+          <span className="opacity-50">&larr; NO</span>
+          <span className="mx-2 opacity-50">|</span>
+          <span className="opacity-50">SKIP &uarr;</span>
+          <span className="mx-2 opacity-50">|</span>
+          <span className="opacity-50">YES &rarr;</span>
+        </div>
 
-      {/* Bet Buttons */}
-      <div className="px-4 py-4">
-        <div className="flex gap-4 max-w-md mx-auto">
+        {/* Bet Buttons */}
+        <div className="flex gap-3 max-w-md mx-auto">
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={() => handleButtonClick('no')}
-            className="flex-1 py-4 border-3 rounded-comic font-bold text-lg active:shadow-none active:translate-x-1 active:translate-y-1 transition-all"
+            className="flex-1 py-3 border-3 rounded-comic font-bold text-base active:shadow-none active:translate-x-1 active:translate-y-1 transition-all"
             style={{
               backgroundColor: isDark ? '#4a2020' : '#fee2e2',
               borderColor: colors.border,
@@ -498,7 +588,7 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={() => handleButtonClick('yes')}
-            className="flex-1 py-4 border-3 rounded-comic font-bold text-lg active:shadow-none active:translate-x-1 active:translate-y-1 transition-all"
+            className="flex-1 py-3 border-3 rounded-comic font-bold text-base active:shadow-none active:translate-x-1 active:translate-y-1 transition-all"
             style={{
               backgroundColor: isDark ? '#1a3a20' : '#dcfce7',
               borderColor: colors.border,

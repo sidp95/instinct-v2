@@ -93,23 +93,23 @@ export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit 
     >
       {/* YES profit preview */}
       <motion.div
-        className="absolute left-0 top-0 bottom-0 w-28 flex items-center justify-center pointer-events-none z-0"
+        className="absolute left-0 top-0 bottom-0 w-24 flex items-center justify-center pointer-events-none z-0"
         style={{ opacity: useTransform(x, [0, 50, 150], [0, 0.3, 1]) }}
       >
-        <div className="text-center px-4 py-3 rounded-2xl border-3 border-comic-border" style={{ backgroundColor: '#D1FAE5' }}>
-          <div className="text-xl font-bold" style={{ color: '#059669' }}>YES</div>
-          <div className="text-lg font-bold" style={{ color: '#059669' }}>+${yesProfit}</div>
+        <div className="text-center px-3 py-2 rounded-xl border-2 border-comic-border" style={{ backgroundColor: '#D1FAE5' }}>
+          <div className="text-base font-bold" style={{ color: '#059669' }}>YES</div>
+          <div className="text-sm font-bold" style={{ color: '#059669' }}>+${yesProfit}</div>
         </div>
       </motion.div>
 
       {/* NO profit preview */}
       <motion.div
-        className="absolute right-0 top-0 bottom-0 w-28 flex items-center justify-center pointer-events-none z-0"
+        className="absolute right-0 top-0 bottom-0 w-24 flex items-center justify-center pointer-events-none z-0"
         style={{ opacity: useTransform(x, [-150, -50, 0], [1, 0.3, 0]) }}
       >
-        <div className="text-center px-4 py-3 rounded-2xl border-3 border-comic-border" style={{ backgroundColor: '#FEE2E2' }}>
-          <div className="text-xl font-bold" style={{ color: '#DC2626' }}>NO</div>
-          <div className="text-lg font-bold" style={{ color: '#DC2626' }}>+${noProfit}</div>
+        <div className="text-center px-3 py-2 rounded-xl border-2 border-comic-border" style={{ backgroundColor: '#FEE2E2' }}>
+          <div className="text-base font-bold" style={{ color: '#DC2626' }}>NO</div>
+          <div className="text-sm font-bold" style={{ color: '#DC2626' }}>+${noProfit}</div>
         </div>
       </motion.div>
 
@@ -138,34 +138,34 @@ export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit 
           />
         )}
 
-        <div className="absolute top-4 left-4 right-4 flex items-center justify-between pointer-events-none">
-          <div className="px-3 py-1 rounded-full border-2 font-bold text-sm" style={{ backgroundColor: categoryColors[market.category] || '#888', borderColor: colors.border }}>
+        <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+          <div className="px-2 py-0.5 rounded-full border-2 font-bold text-xs" style={{ backgroundColor: categoryColors[market.category] || '#888', borderColor: colors.border }}>
             {market.category}
           </div>
           {market.expirationTime && (
-            <div className="px-3 py-1 rounded-full border-2 font-bold text-sm" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.9)' : 'rgba(255, 255, 255, 0.9)', borderColor: colors.border, color: colors.text }}>
+            <div className="px-2 py-0.5 rounded-full border-2 font-bold text-xs" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.9)' : 'rgba(255, 255, 255, 0.9)', borderColor: colors.border, color: colors.text }}>
               ⏱ {formatTimeUntil(market.expirationTime)}
             </div>
           )}
         </div>
 
-        <div className="absolute bottom-0 left-0 right-0 backdrop-blur-sm border-t-3 p-4 pointer-events-none" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.85)' : 'rgba(255, 255, 255, 0.75)', borderColor: colors.border }}>
-          <h2 className="text-xl font-bold leading-tight" style={{ color: colors.text }}>{market.title}</h2>
+        <div className="absolute bottom-0 left-0 right-0 backdrop-blur-sm border-t-3 p-3 pointer-events-none" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.85)' : 'rgba(255, 255, 255, 0.75)', borderColor: colors.border }}>
+          <h2 className="text-lg font-bold leading-tight" style={{ color: colors.text }}>{market.title}</h2>
         </div>
 
         {/* YES stamp */}
         <motion.div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ opacity: yesOpacity }}>
-          <div className="text-5xl font-bold text-green-500 border-6 border-green-500 rounded-xl px-6 py-3 -rotate-12" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.9)' : 'rgba(255, 255, 255, 0.8)' }}>YES</div>
+          <div className="text-4xl font-bold text-green-500 border-4 border-green-500 rounded-xl px-5 py-2 -rotate-12" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.9)' : 'rgba(255, 255, 255, 0.8)' }}>YES</div>
         </motion.div>
 
         {/* NO stamp */}
         <motion.div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ opacity: noOpacity }}>
-          <div className="text-5xl font-bold text-red-500 border-6 border-red-500 rounded-xl px-6 py-3 rotate-12" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.9)' : 'rgba(255, 255, 255, 0.8)' }}>NO</div>
+          <div className="text-4xl font-bold text-red-500 border-4 border-red-500 rounded-xl px-5 py-2 rotate-12" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.9)' : 'rgba(255, 255, 255, 0.8)' }}>NO</div>
         </motion.div>
 
         {/* SKIP stamp */}
         <motion.div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ opacity: skipOpacity }}>
-          <div className="text-4xl font-bold text-blue-500 border-6 border-blue-500 rounded-xl px-6 py-3" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.9)' : 'rgba(255, 255, 255, 0.8)' }}>SKIP</div>
+          <div className="text-3xl font-bold text-blue-500 border-4 border-blue-500 rounded-xl px-5 py-2" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.9)' : 'rgba(255, 255, 255, 0.8)' }}>SKIP</div>
         </motion.div>
       </motion.div>
     </motion.div>

@@ -15,6 +15,7 @@ export function ToastProvider({ children }) {
       message: options.message,
       button: options.button,
       onButtonClick: options.onButtonClick,
+      onClick: options.onClick, // Make entire toast tappable
       autoDismiss: options.autoDismiss !== false,
       duration: options.duration || 3000,
     };
