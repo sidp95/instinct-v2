@@ -76,7 +76,7 @@ export default function CategoryFilter({ selectedCategories, onToggle, available
   };
 
   return (
-    <div className="px-4 py-1" ref={dropdownRef} style={{ position: 'relative', zIndex: 100 }}>
+    <div ref={dropdownRef} style={{ position: 'relative', zIndex: 100 }}>
       {/* Filter Button */}
       <motion.button
         whileTap={{ scale: 0.95 }}

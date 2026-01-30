@@ -10,13 +10,13 @@ export default function LogoutButton() {
       onClick={() => handleLogOut()}
       style={{
         position: 'absolute',
-        top: '16px',
-        right: '16px',
-        width: '40px',
-        height: '40px',
+        top: '10px',
+        right: '12px',
+        width: '36px',
+        height: '36px',
         borderRadius: '50%',
         backgroundColor: colors.paper,
-        border: `3px solid ${colors.border}`,
+        border: `2px solid ${colors.border}`,
         boxShadow: `2px 2px 0 ${colors.border}`,
         cursor: 'pointer',
         display: 'flex',
@@ -27,8 +27,8 @@ export default function LogoutButton() {
       title="Logout"
     >
       <svg
-        width="20"
-        height="20"
+        width="18"
+        height="18"
         viewBox="0 0 24 24"
         fill="none"
         stroke={colors.text}

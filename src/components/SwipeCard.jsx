@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { categoryColors } from '../data/markets';
 import { useTheme } from '../context/ThemeContext';
+import { playSwipeSound, unlockAudio } from '../utils/sounds';
 
 function formatTimeUntil(expirationTime) {
   if (!expirationTime) return null;
@@ -46,6 +47,11 @@ export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit 
     );
   }
 
+  // Unlock audio on first touch (iOS requirement)
+  const handleDragStart = () => {
+    unlockAudio();
+  };
+
   const handleDragEnd = (event, info) => {
     const threshold = 100;
     const yThreshold = 80;
@@ -57,6 +63,7 @@ export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit 
 
     if (isVerticalDominant && info.offset.y < -yThreshold) {
       // Swipe up - SKIP (prioritize when vertical movement is dominant)
+      playSwipeSound();
       animate(y, -500, { duration: 0.3 });
       animate(x, 0, { duration: 0.3 });
       setTimeout(() => {
@@ -65,6 +72,7 @@ export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit 
       }, 300);
     } else if (info.offset.x > threshold) {
       // Swipe right - YES
+      playSwipeSound();
       animate(x, 500, { duration: 0.3 });
       setTimeout(() => {
         console.log('[SwipeCard] Calling onSwipe(yes)');
@@ -72,6 +80,7 @@ export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit 
       }, 300);
     } else if (info.offset.x < -threshold) {
       // Swipe left - NO
+      playSwipeSound();
       animate(x, -500, { duration: 0.3 });
       setTimeout(() => {
         console.log('[SwipeCard] Calling onSwipe(no)');
@@ -125,6 +134,7 @@ export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit 
           touchAction: 'none'
         }}
         drag
+        onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         whileTap={{ cursor: 'grabbing' }}
       >

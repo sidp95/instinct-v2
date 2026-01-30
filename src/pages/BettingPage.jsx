@@ -12,6 +12,7 @@ import { getMarketsForApp, placeBet } from '../services/dflow';
 import { useToast } from '../context/ToastContext';
 import { useTheme } from '../context/ThemeContext';
 import { useMarketHistory } from '../hooks/useMarketHistory';
+import { playSwipeSound } from '../utils/sounds';
 
 const SOLANA_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -68,13 +69,13 @@ function ThemeToggleButton({ isDark, onToggle, colors }) {
       onClick={onToggle}
       style={{
         position: 'absolute',
-        top: '16px',
-        right: '64px',
-        width: '40px',
-        height: '40px',
+        top: '10px',
+        right: '56px',
+        width: '36px',
+        height: '36px',
         borderRadius: '50%',
         backgroundColor: colors.paper,
-        border: `3px solid ${colors.border}`,
+        border: `2px solid ${colors.border}`,
         boxShadow: `2px 2px 0 ${colors.border}`,
         cursor: 'pointer',
         display: 'flex',
@@ -86,7 +87,7 @@ function ThemeToggleButton({ isDark, onToggle, colors }) {
     >
       {isDark ? (
         // Sun icon for dark mode (click to go light)
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="5" />
           <line x1="12" y1="1" x2="12" y2="3" />
           <line x1="12" y1="21" x2="12" y2="23" />
@@ -99,7 +100,7 @@ function ThemeToggleButton({ isDark, onToggle, colors }) {
         </svg>
       ) : (
         // Moon icon for light mode (click to go dark)
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
         </svg>
       )}
@@ -366,6 +367,7 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
   }, [warning, currentMarket, addToHistory]);
 
   const handleButtonClick = (choice) => {
+    playSwipeSound();
     handleSwipe(choice);
   };
 
@@ -499,15 +501,17 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
       <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
       <LogoutButton />
 
-      {/* Top section - fixed height */}
+      {/* Top section - fixed height with consistent spacing */}
       <div style={{ flexShrink: 0 }}>
         <Header />
-        <CategoryFilter
-          selectedCategories={selectedCategories}
-          onToggle={handleCategoryToggle}
-          availableCategories={availableCategories}
-        />
-        <div className="px-4 pt-1 pb-2">
+        <div style={{ padding: '12px 16px 8px 16px' }}>
+          <CategoryFilter
+            selectedCategories={selectedCategories}
+            onToggle={handleCategoryToggle}
+            availableCategories={availableCategories}
+          />
+        </div>
+        <div style={{ padding: '0 16px 12px 16px' }}>
           <Timer
             resetKey={currentIndex}
             onComplete={handleTimerComplete}
