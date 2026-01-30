@@ -4,6 +4,50 @@ import { categoryColors } from '../data/markets';
 import { useTheme } from '../context/ThemeContext';
 import LogoutButton from '../components/LogoutButton';
 
+// Theme toggle button component (same as BettingPage)
+function ThemeToggleButton({ isDark, onToggle, colors }) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        position: 'absolute',
+        top: '10px',
+        right: '56px',
+        width: '36px',
+        height: '36px',
+        borderRadius: '50%',
+        backgroundColor: colors.paper,
+        border: `2px solid ${colors.border}`,
+        boxShadow: `2px 2px 0 ${colors.border}`,
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 100,
+      }}
+      title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+    >
+      {isDark ? (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="5" />
+          <line x1="12" y1="1" x2="12" y2="3" />
+          <line x1="12" y1="21" x2="12" y2="23" />
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+          <line x1="1" y1="12" x2="3" y2="12" />
+          <line x1="21" y1="12" x2="23" y2="12" />
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+        </svg>
+      ) : (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Weather', 'Stocks', 'Commodities'];
 const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest first' },
@@ -290,7 +334,7 @@ function FilterBar({ selectedCategory, setSelectedCategory, sortBy, setSortBy, c
 }
 
 export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
-  const { colors } = useTheme();
+  const { colors, isDark, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('open');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [sortBy, setSortBy] = useState('newest');
@@ -398,13 +442,17 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
 
   return (
     <div className="flex flex-col h-full" style={{ position: 'relative' }}>
+      {/* Theme toggle and logout buttons - positioned in header */}
+      <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
       <LogoutButton />
+
       {/* Header */}
       <header
         className="px-4 py-4 border-b-3"
         style={{
           backgroundColor: colors.paper,
           borderColor: colors.border,
+          minHeight: '56px',
         }}
       >
         <div className="flex items-center justify-between mb-4">
@@ -418,6 +466,7 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
               border: `2px solid ${colors.border}`,
               boxShadow: `1px 1px 0 ${colors.border}`,
               cursor: isRefreshing ? 'not-allowed' : 'pointer',
+              marginRight: '80px', // Space for theme + logout buttons
             }}
             title="Refresh positions"
           >

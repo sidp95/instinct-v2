@@ -7,6 +7,50 @@ import { getAssociatedTokenAddress, createTransferInstruction, createAssociatedT
 import { useTheme } from '../context/ThemeContext';
 import LogoutButton from '../components/LogoutButton';
 
+// Theme toggle button component
+function ThemeToggleButton({ isDark, onToggle, colors }) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        position: 'absolute',
+        top: '10px',
+        right: '56px',
+        width: '36px',
+        height: '36px',
+        borderRadius: '50%',
+        backgroundColor: colors.paper,
+        border: `2px solid ${colors.border}`,
+        boxShadow: `2px 2px 0 ${colors.border}`,
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 100,
+      }}
+      title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+    >
+      {isDark ? (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="5" />
+          <line x1="12" y1="1" x2="12" y2="3" />
+          <line x1="12" y1="21" x2="12" y2="23" />
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+          <line x1="1" y1="12" x2="3" y2="12" />
+          <line x1="21" y1="12" x2="23" y2="12" />
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+        </svg>
+      ) : (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 const presetAmounts = [1, 2, 5, 10, 25];
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOLANA_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
@@ -787,7 +831,7 @@ function ExportKeysModal({ onClose, onExport, colors }) {
 export default function WalletPage({ betSize, setBetSize }) {
   const { primaryWallet } = useDynamicContext();
   const { initExportProcess } = useEmbeddedReveal();
-  const { colors } = useTheme();
+  const { colors, isDark, toggleTheme } = useTheme();
   const [customAmount, setCustomAmount] = useState('');
   const [copied, setCopied] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
@@ -916,14 +960,17 @@ export default function WalletPage({ betSize, setBetSize }) {
 
   return (
     <>
+      <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
       <LogoutButton />
       <div style={{
         display: 'flex',
         flexDirection: 'column',
-        height: 'calc(100vh - 96px)',
+        minHeight: 'calc(100vh - 96px)',
         padding: '16px',
+        paddingBottom: '100px', // Extra space for bottom nav
         gap: '12px',
-        overflow: 'hidden',
+        overflowY: 'auto',
+        overflowX: 'hidden',
         position: 'relative',
       }}>
         {/* Balance Card */}

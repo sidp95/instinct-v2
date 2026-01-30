@@ -33,8 +33,31 @@ export function useOnChainPositions(walletAddress) {
       const onChainPositions = await fetchUserPositionsOnChain(walletAddress);
       console.log('[DEBUG-HISTORY] fetchUserPositionsOnChain returned:', onChainPositions.length, 'positions');
 
+      // Log raw positions for debugging
+      console.log('[DEBUG-HISTORY] Raw positions from API:', onChainPositions.map(p => ({
+        marketId: p.market?.id,
+        ticker: p.market?.ticker,
+        choice: p.choice,
+        amount: p.amount,
+        tokenMint: p.tokenMint?.substring(0, 10),
+      })));
+
+      // Deduplicate by tokenMint (each position token should be unique)
+      const seen = new Set();
+      const uniquePositions = onChainPositions.filter(pos => {
+        const key = pos.tokenMint || `${pos.market?.id}-${pos.choice}`;
+        if (seen.has(key)) {
+          console.log('[DEBUG-HISTORY] DUPLICATE found:', key);
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+
+      console.log('[DEBUG-HISTORY] After dedup:', uniquePositions.length, 'positions (was', onChainPositions.length, ')');
+
       // Transform to match the bet format used in HistoryPage
-      const transformedPositions = onChainPositions.map(pos => {
+      const transformedPositions = uniquePositions.map(pos => {
         const tokenCount = pos.amount;
         const currentPrice = pos.choice === 'yes' ? pos.market.yesPrice : pos.market.noPrice;
 
@@ -43,12 +66,9 @@ export function useOnChainPositions(walletAddress) {
         const atRisk = tokenCount * currentPrice;
         const potentialProfit = tokenCount * (1 - currentPrice);
 
-        console.log('[DEBUG-CALC] Position:', pos.market.id);
-        console.log('[DEBUG-CALC]   choice:', pos.choice);
-        console.log('[DEBUG-CALC]   tokenCount:', tokenCount);
-        console.log('[DEBUG-CALC]   currentPrice:', currentPrice);
-        console.log('[DEBUG-CALC]   atRisk (tokenCount * price):', atRisk.toFixed(2));
-        console.log('[DEBUG-CALC]   potentialProfit (tokenCount * (1-price)):', potentialProfit.toFixed(2));
+        console.log('[DEBUG-CALC] Position:', pos.market.ticker || pos.market.id);
+        console.log('[DEBUG-CALC]   choice:', pos.choice, '| tokens:', tokenCount, '| price:', currentPrice);
+        console.log('[DEBUG-CALC]   atRisk:', atRisk.toFixed(2), '| profit:', potentialProfit.toFixed(2));
 
         return {
           market: pos.market,
@@ -65,7 +85,8 @@ export function useOnChainPositions(walletAddress) {
       });
 
       setPositions(transformedPositions);
-      console.log('[useOnChainPositions] Found', transformedPositions.length, 'positions');
+      console.log('[useOnChainPositions] Final positions:', transformedPositions.length);
+      console.log('[useOnChainPositions] Total at risk:', transformedPositions.reduce((sum, p) => sum + p.amount, 0).toFixed(2));
     } catch (err) {
       console.error('[useOnChainPositions] Error:', err);
       setError(err.message);
