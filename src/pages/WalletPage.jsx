@@ -781,6 +781,7 @@ export default function WalletPage({ betSize, setBetSize }) {
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
+  const [transactionError, setTransactionError] = useState(null);
 
   // Get wallet from Dynamic
   const walletAddress = primaryWallet?.address || null;
@@ -829,10 +830,20 @@ export default function WalletPage({ betSize, setBetSize }) {
   useEffect(() => {
     if (walletAddress) {
       setIsLoadingTransactions(true);
-      fetchTransactionHistory(walletAddress).then(txs => {
-        setTransactions(txs);
-        setIsLoadingTransactions(false);
-      });
+      setTransactionError(null);
+      console.log('[WalletPage] Fetching transaction history for:', walletAddress);
+      fetchTransactionHistory(walletAddress)
+        .then(txs => {
+          console.log('[WalletPage] Transaction history loaded:', txs.length, 'transactions');
+          console.log('[WalletPage] Transactions:', txs);
+          setTransactions(txs);
+          setIsLoadingTransactions(false);
+        })
+        .catch(err => {
+          console.error('[WalletPage] Failed to fetch transactions:', err);
+          setTransactionError(err.message);
+          setIsLoadingTransactions(false);
+        });
     }
   }, [walletAddress]);
 
@@ -1241,6 +1252,16 @@ export default function WalletPage({ betSize, setBetSize }) {
                 fontWeight: 'bold',
               }}>
                 Loading transactions...
+              </div>
+            ) : transactionError ? (
+              <div style={{
+                textAlign: 'center',
+                padding: '20px',
+                color: '#dc2626',
+              }}>
+                <div style={{ fontSize: '24px', marginBottom: '8px' }}>⚠️</div>
+                <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>Failed to load transactions</div>
+                <div style={{ fontSize: '12px', color: colors.textMuted }}>{transactionError}</div>
               </div>
             ) : transactions.length === 0 ? (
               <div style={{
