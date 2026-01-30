@@ -16,13 +16,28 @@ export default function Header() {
       {/* Logo */}
       <div className="flex items-center gap-2">
         <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center"
           style={{
-            backgroundColor: colors.border,
+            width: '42px',
+            height: '42px',
+            borderRadius: '8px',
+            backgroundColor: '#fff',
+            border: `2px solid ${colors.border}`,
             boxShadow: `2px 2px 0 ${colors.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '4px',
           }}
         >
-          <span className="text-white font-bold text-xl">I</span>
+          <img
+            src="/logo.png"
+            alt="Instinkt"
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+            }}
+          />
         </div>
         <h1 className="text-xl font-bold" style={{ color: colors.text }}>Instinkt</h1>
       </div>
