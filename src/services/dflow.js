@@ -685,11 +685,24 @@ export async function fetchUserPositionsOnChain(userPublicKey) {
       if (!parsed) continue;
 
       const mint = parsed.mint;
-      const amount = parseFloat(parsed.tokenAmount?.uiAmount || 0);
+      const tokenAmount = parsed.tokenAmount;
+
+      // Log raw token data for debugging
+      console.log('[DEBUG-HISTORY] Token account:', {
+        mint: mint?.substring(0, 10) + '...',
+        rawAmount: tokenAmount?.amount,
+        uiAmount: tokenAmount?.uiAmount,
+        decimals: tokenAmount?.decimals,
+      });
+
+      // Use uiAmount which is already decimal-adjusted
+      const amount = parseFloat(tokenAmount?.uiAmount || 0);
 
       if (amount > 0) {
         mintBalances.set(mint, {
           amount,
+          rawAmount: tokenAmount?.amount,
+          decimals: tokenAmount?.decimals,
           tokenAccount: account.pubkey,
         });
       }
@@ -771,11 +784,15 @@ export async function fetchUserPositionsOnChain(userPublicKey) {
       // Check if user has YES tokens
       if (usdcAccount.yesMint && mintBalances.has(usdcAccount.yesMint)) {
         const balance = mintBalances.get(usdcAccount.yesMint);
-        console.log('[DEBUG-HISTORY] User has YES position in', market.ticker, '- amount:', balance.amount);
+        console.log('[DEBUG-HISTORY] YES position in', market.ticker);
+        console.log('[DEBUG-HISTORY]   uiAmount:', balance.amount, '| rawAmount:', balance.rawAmount, '| decimals:', balance.decimals);
+        console.log('[DEBUG-HISTORY]   market.yesAsk:', market.yesAsk, '| market.yesBid:', market.yesBid);
         positions.push({
           market: transformMarket(market),
           choice: 'yes',
           amount: balance.amount,
+          rawAmount: balance.rawAmount,
+          decimals: balance.decimals,
           tokenMint: usdcAccount.yesMint,
           tokenAccount: balance.tokenAccount,
           isOnChain: true,
@@ -785,11 +802,15 @@ export async function fetchUserPositionsOnChain(userPublicKey) {
       // Check if user has NO tokens
       if (usdcAccount.noMint && mintBalances.has(usdcAccount.noMint)) {
         const balance = mintBalances.get(usdcAccount.noMint);
-        console.log('[DEBUG-HISTORY] User has NO position in', market.ticker, '- amount:', balance.amount);
+        console.log('[DEBUG-HISTORY] NO position in', market.ticker);
+        console.log('[DEBUG-HISTORY]   uiAmount:', balance.amount, '| rawAmount:', balance.rawAmount, '| decimals:', balance.decimals);
+        console.log('[DEBUG-HISTORY]   market.noAsk:', market.noAsk, '| market.noBid:', market.noBid);
         positions.push({
           market: transformMarket(market),
           choice: 'no',
           amount: balance.amount,
+          rawAmount: balance.rawAmount,
+          decimals: balance.decimals,
           tokenMint: usdcAccount.noMint,
           tokenAccount: balance.tokenAccount,
           isOnChain: true,

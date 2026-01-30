@@ -67,7 +67,16 @@ export function useOnChainPositions(walletAddress) {
       // Transform to match the bet format used in HistoryPage
       const transformedPositions = uniquePositions.map(pos => {
         const tokenCount = pos.amount;
+        const rawAmount = pos.rawAmount;
+        const decimals = pos.decimals;
         const currentPrice = pos.choice === 'yes' ? pos.market.yesPrice : pos.market.noPrice;
+
+        console.log('[DEBUG-CALC] ----------------------------------------');
+        console.log('[DEBUG-CALC] Position:', pos.market.ticker || pos.market.id);
+        console.log('[DEBUG-CALC]   rawAmount:', rawAmount, '| decimals:', decimals, '| uiAmount (tokenCount):', tokenCount);
+        console.log('[DEBUG-CALC]   choice:', pos.choice);
+        console.log('[DEBUG-CALC]   market.yesPrice:', pos.market.yesPrice, '| market.noPrice:', pos.market.noPrice);
+        console.log('[DEBUG-CALC]   currentPrice used:', currentPrice);
 
         // Current Value = tokenCount * currentPrice (what position is worth NOW if sold)
         // Note: This is NOT cost basis (what user paid) - we don't have that data
@@ -75,9 +84,8 @@ export function useOnChainPositions(walletAddress) {
         const currentValue = tokenCount * currentPrice;
         const potentialProfit = tokenCount * (1 - currentPrice);
 
-        console.log('[DEBUG-CALC] Position:', pos.market.ticker || pos.market.id);
-        console.log('[DEBUG-CALC]   choice:', pos.choice, '| tokens:', tokenCount, '| price:', currentPrice);
-        console.log('[DEBUG-CALC]   currentValue:', currentValue.toFixed(2), '| potentialProfit:', potentialProfit.toFixed(2));
+        console.log('[DEBUG-CALC]   CALCULATION: tokenCount(' + tokenCount + ') * price(' + currentPrice + ') = value(' + currentValue.toFixed(4) + ')');
+        console.log('[DEBUG-CALC]   CALCULATION: tokenCount(' + tokenCount + ') * (1-' + currentPrice + ') = profit(' + potentialProfit.toFixed(4) + ')');
 
         return {
           market: pos.market,
