@@ -1,29 +1,34 @@
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useTheme } from '../context/ThemeContext';
 
-export default function LogoutButton() {
+export default function LogoutButton({ inline = false }) {
   const { handleLogOut } = useDynamicContext();
   const { colors } = useTheme();
+
+  const baseStyle = {
+    width: '36px',
+    height: '36px',
+    borderRadius: '50%',
+    backgroundColor: colors.paper,
+    border: `2px solid ${colors.border}`,
+    boxShadow: inline ? `1px 1px 0 ${colors.border}` : `2px 2px 0 ${colors.border}`,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  };
+
+  const absoluteStyle = inline ? {} : {
+    position: 'absolute',
+    top: '10px',
+    right: '12px',
+    zIndex: 100,
+  };
 
   return (
     <button
       onClick={() => handleLogOut()}
-      style={{
-        position: 'absolute',
-        top: '10px',
-        right: '12px',
-        width: '36px',
-        height: '36px',
-        borderRadius: '50%',
-        backgroundColor: colors.paper,
-        border: `2px solid ${colors.border}`,
-        boxShadow: `2px 2px 0 ${colors.border}`,
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 100,
-      }}
+      style={{ ...baseStyle, ...absoluteStyle }}
       title="Logout"
     >
       <svg
