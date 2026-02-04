@@ -1,43 +1,27 @@
+import { debug, logError } from '../utils/debug';
+
 const API_BASE = 'https://c.prediction-markets-api.dflow.net/api/v1';
 const TRADE_API_BASE = 'https://c.quote-api.dflow.net';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
-
-// Show markets expiring within 24 hours (includes 15-min crypto markets)
-const MAX_EXPIRY_HOURS = 24;
-
-/**
- * Fetch active markets from DFlow API with nested market accounts
- * @param {Object} options - Query options
- * @param {number} options.limit - Number of events to fetch
- * @returns {Promise<Array>} Array of markets with token mint addresses
- */
 // 15-minute crypto market series tickers
 const CRYPTO_15M_SERIES = 'KXSOL15M,KXBTC15M,KXETH15M';
 
+/**
+ * Fetch active markets from DFlow API with nested market accounts
+ */
 export async function fetchActiveMarkets({ limit = 100, include15MinCrypto = true } = {}) {
-  console.log('[DEBUG-MARKETS] fetchActiveMarkets called with:', { limit, include15MinCrypto });
-
-  // Use proxy to avoid CORS (local proxy in dev, Vercel serverless in prod)
   const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
-  const baseUrl = isDev
-    ? 'http://localhost:3001/api/markets'
-    : '/api/markets';
-
-  console.log('[DEBUG-MARKETS] Using baseUrl:', baseUrl);
+  const baseUrl = isDev ? 'http://localhost:3001/api/markets' : '/api/markets';
 
   try {
     // Fetch regular markets
     const regularUrl = `${baseUrl}?withNestedMarkets=true&status=active&limit=${limit}`;
-    console.log('[DFlow] Fetching regular markets from:', regularUrl);
-
     const regularResponse = await fetch(regularUrl);
     let allMarkets = [];
 
     if (regularResponse.ok) {
       const data = await regularResponse.json();
-
-      // Flatten events into markets
       for (const event of (data.events || [])) {
         if (event.markets) {
           for (const market of event.markets) {
@@ -50,35 +34,21 @@ export async function fetchActiveMarkets({ limit = 100, include15MinCrypto = tru
           }
         }
       }
-      console.log('[DFlow] Regular markets:', allMarkets.length);
+      debug('[Markets] Regular markets:', allMarkets.length);
     }
 
-    // Fetch 15-minute crypto markets separately (different series tickers)
-    console.log('[DEBUG-CRYPTO15M] include15MinCrypto flag:', include15MinCrypto);
+    // Fetch 15-minute crypto markets separately
     if (include15MinCrypto) {
-      console.log('[DEBUG-CRYPTO15M] ========================================');
-      console.log('[DEBUG-CRYPTO15M] Fetching 15-minute crypto markets');
-      console.log('[DEBUG-CRYPTO15M] Series tickers:', CRYPTO_15M_SERIES);
-
       try {
         const crypto15mUrl = `${baseUrl}?withNestedMarkets=true&seriesTickers=${CRYPTO_15M_SERIES}&status=active&limit=20`;
-        console.log('[DEBUG-CRYPTO15M] Full URL:', crypto15mUrl);
-
         const crypto15mResponse = await fetch(crypto15mUrl);
-        console.log('[DEBUG-CRYPTO15M] Response status:', crypto15mResponse.status);
 
         if (crypto15mResponse.ok) {
           const crypto15mData = await crypto15mResponse.json();
-          console.log('[DEBUG-CRYPTO15M] Raw API response:', JSON.stringify(crypto15mData).substring(0, 500));
-          console.log('[DEBUG-CRYPTO15M] Events returned:', crypto15mData.events?.length || 0);
-
           let crypto15mCount = 0;
           for (const event of (crypto15mData.events || [])) {
-            console.log('[DEBUG-CRYPTO15M] Event:', event.ticker, 'markets:', event.markets?.length || 0);
             if (event.markets) {
               for (const market of event.markets) {
-                console.log('[DEBUG-CRYPTO15M] Market found:', market.ticker, '-', market.title?.substring(0, 50));
-                // Mark these as 15-min markets
                 allMarkets.push({
                   ...market,
                   eventTicker: event.ticker,
@@ -90,26 +60,17 @@ export async function fetchActiveMarkets({ limit = 100, include15MinCrypto = tru
               }
             }
           }
-          console.log('[DEBUG-CRYPTO15M] Total 15-min crypto markets added:', crypto15mCount);
-          console.log('[DEBUG-CRYPTO15M] Total markets now:', allMarkets.length);
-        } else {
-          const errorText = await crypto15mResponse.text();
-          console.log('[DEBUG-CRYPTO15M] API FAILED:', crypto15mResponse.status, errorText);
+          debug('[Markets] 15M crypto markets:', crypto15mCount);
         }
       } catch (e) {
-        console.log('[DEBUG-CRYPTO15M] Fetch EXCEPTION:', e.message);
+        debug('[Markets] 15M fetch failed:', e.message);
       }
-      console.log('[DEBUG-CRYPTO15M] ========================================');
     }
 
-    console.log('[DEBUG-MARKETS] Final allMarkets count before return:', allMarkets.length);
-    console.log('[DEBUG-MARKETS] Markets with is15MinMarket flag:', allMarkets.filter(m => m.is15MinMarket).length);
-
-    if (allMarkets.length > 0) {
-      return allMarkets;
-    }
+    debug('[Markets] Total:', allMarkets.length);
+    if (allMarkets.length > 0) return allMarkets;
   } catch (e) {
-    console.log('[DFlow] Events endpoint failed:', e.message);
+    debug('[Markets] Fetch failed:', e.message);
   }
 
   throw new Error('Failed to fetch markets');
@@ -117,38 +78,24 @@ export async function fetchActiveMarkets({ limit = 100, include15MinCrypto = tru
 
 /**
  * Fetch events from DFlow API
- * @param {Object} options - Query options
- * @param {number} options.limit - Number of events to fetch
- * @returns {Promise<Array>} Array of events
  */
 export async function fetchEvents({ limit = 200 } = {}) {
   const response = await fetch(`${API_BASE}/events?limit=${limit}`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch events: ${response.status}`);
-  }
-
+  if (!response.ok) throw new Error(`Failed to fetch events: ${response.status}`);
   const data = await response.json();
   return data.events || [];
 }
 
 /**
  * Fetch detailed market info including token mints
- * @param {string} marketTicker - Market ticker
- * @returns {Promise<Object|null>} Market details or null if not found
  */
 export async function getMarketDetails(marketTicker) {
   try {
     const response = await fetch(`${API_BASE}/markets/${marketTicker}`);
-    if (!response.ok) {
-      console.log('[DFlow] Failed to fetch market details:', response.status);
-      return null;
-    }
-    const data = await response.json();
-    console.log('[DFlow] Market details:', data);
-    return data;
+    if (!response.ok) return null;
+    return await response.json();
   } catch (e) {
-    console.error('[DFlow] Error fetching market details:', e);
+    logError('[Market] Error fetching details:', e.message);
     return null;
   }
 }
@@ -167,15 +114,12 @@ const categoryImages = {
 
 /**
  * Get image URL based on market title keywords
- * @param {Object} market - Market object
- * @param {string} category - Market category
- * @returns {string} Image URL
  */
 function getMarketImage(market, category) {
   const title = (market.title || '').toLowerCase();
 
-  // Sports - specific matches
-  if (title.includes('football') || title.includes('nfl') || title.includes('super bowl') || title.includes('pro football')) {
+  // Sports
+  if (title.includes('football') || title.includes('nfl') || title.includes('super bowl')) {
     return 'https://images.unsplash.com/photo-1566577739112-5180d4bf9390?w=800&h=600&fit=crop';
   }
   if (title.includes('basketball') || title.includes('nba')) {
@@ -190,12 +134,9 @@ function getMarketImage(market, category) {
   if (title.includes('boxing') || title.includes('ufc') || title.includes('fight')) {
     return 'https://images.unsplash.com/photo-1549719386-74dfcbf7dbed?w=800&h=600&fit=crop';
   }
-  if (title.includes('college football') || title.includes('ncaa')) {
-    return 'https://images.unsplash.com/photo-1566577739112-5180d4bf9390?w=800&h=600&fit=crop';
-  }
 
   // Politics
-  if (title.includes('trump') || title.includes('biden') || title.includes('president') || title.includes('election') || title.includes('governor') || title.includes('mayor')) {
+  if (title.includes('trump') || title.includes('biden') || title.includes('president') || title.includes('election')) {
     return 'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?w=800&h=600&fit=crop';
   }
 
@@ -206,86 +147,57 @@ function getMarketImage(market, category) {
   if (title.includes('ethereum') || title.includes('eth')) {
     return 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?w=800&h=600&fit=crop';
   }
-  if (title.includes('crypto')) {
-    return 'https://images.unsplash.com/photo-1518546305927-5a555bb7020d?w=800&h=600&fit=crop';
-  }
 
-  // Finance/Stocks
-  if (title.includes('stock') || title.includes('s&p') || title.includes('nasdaq') || title.includes('dow')) {
+  // Finance
+  if (title.includes('stock') || title.includes('s&p') || title.includes('nasdaq')) {
     return 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=800&h=600&fit=crop';
   }
-  if (title.includes('federal reserve') || title.includes('fed ') || title.includes('rate cut') || title.includes('rate hike') || title.includes('interest rate')) {
+  if (title.includes('federal reserve') || title.includes('rate cut') || title.includes('interest rate')) {
     return 'https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=800&h=600&fit=crop';
   }
 
-  // Weather
-  if (title.includes('weather') || title.includes('rain') || title.includes('temperature') || title.includes('hurricane') || title.includes('snow')) {
-    return 'https://images.unsplash.com/photo-1534088568595-a066f410bcda?w=800&h=600&fit=crop';
-  }
-
   // Tech
-  if (title.includes('apple') || title.includes('iphone')) {
-    return 'https://images.unsplash.com/photo-1491933382434-500287f9b54b?w=800&h=600&fit=crop';
-  }
-  if (title.includes('google')) {
-    return 'https://images.unsplash.com/photo-1573804633927-bfcbcd909acd?w=800&h=600&fit=crop';
-  }
-  if (title.includes('tesla')) {
-    return 'https://images.unsplash.com/photo-1560958089-b8a1929cea89?w=800&h=600&fit=crop';
-  }
-  if (title.includes('ai') || title.includes('artificial intelligence') || title.includes('chatgpt') || title.includes('openai')) {
+  if (title.includes('ai') || title.includes('chatgpt') || title.includes('openai')) {
     return 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=800&h=600&fit=crop';
   }
 
-  // Entertainment/Culture
-  if (title.includes('spotify') || title.includes('music') || title.includes('artist')) {
-    return 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&h=600&fit=crop';
-  }
-  if (title.includes('time person') || title.includes('time\'s person')) {
-    return 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&h=600&fit=crop';
-  }
-
-  // Fallback to category-based image
   return categoryImages[category] || categoryImages.Other;
 }
 
 /**
  * Transform DFlow market data to our app's format
- * @param {Object} market - Raw DFlow market object
- * @param {Map} eventImages - Map of eventTicker -> imageUrl
- * @returns {Object} Transformed market for our app
  */
 export function transformMarket(market, eventImages = new Map()) {
-  // Parse prices (they come as strings like "0.4000")
-  const yesAsk = parseFloat(market.yesAsk) || 0.5;
-  const noAsk = parseFloat(market.noAsk) || 0.5;
+  const isResolved = market.status === 'finalized' || market.status === 'resolved';
+  const resolution = market.result || market.resolution;
 
-  // Calculate profit multipliers
-  // If you buy YES at 0.40 and win, you get 1.00 back, so profit = (1/0.40) - 1 = 1.5 (150%)
+  let yesAsk, noAsk, yesBid, noBid;
+
+  if (isResolved && resolution) {
+    if (resolution === 'yes') {
+      yesAsk = 1.0; yesBid = 1.0; noAsk = 0.0; noBid = 0.0;
+    } else {
+      yesAsk = 0.0; yesBid = 0.0; noAsk = 1.0; noBid = 1.0;
+    }
+  } else {
+    yesAsk = parseFloat(market.yesAsk) || 0.5;
+    noAsk = parseFloat(market.noAsk) || 0.5;
+    yesBid = parseFloat(market.yesBid) || yesAsk;
+    noBid = parseFloat(market.noBid) || noAsk;
+  }
+
   const yesProfit = yesAsk > 0 ? (1 / yesAsk) - 1 : 1;
   const noProfit = noAsk > 0 ? (1 / noAsk) - 1 : 1;
 
-  // Extract category from market (checks both ticker and title)
   const category = getCategoryFromMarket(market);
 
-  // Get image: first try event imageUrl, then event image from map, then keyword matching
   let image = market.imageUrl || eventImages.get(market.eventTicker);
-  if (!image) {
-    image = getMarketImage(market, category);
-  }
+  if (!image) image = getMarketImage(market, category);
 
-  // Extract yes/no token mints from USDC settlement account
   const usdcAccount = market.accounts?.[USDC_MINT];
   const accountKeys = Object.keys(market.accounts || {});
   const fallbackAccount = accountKeys.length > 0 ? market.accounts[accountKeys[0]] : null;
   const settlementAccount = usdcAccount || fallbackAccount;
-
-  const yesMint = settlementAccount?.yesMint || null;
-  const noMint = settlementAccount?.noMint || null;
-
-  if (settlementAccount) {
-    console.log('[DFlow] Extracted mints - YES:', yesMint, 'NO:', noMint);
-  }
 
   return {
     id: market.ticker,
@@ -294,48 +206,39 @@ export function transformMarket(market, eventImages = new Map()) {
     subtitle: market.subtitle || market.yesSubTitle || '',
     category: category,
     image: image,
-    yesProfit: Math.round(yesProfit * 100) / 100, // Round to 2 decimals
+    yesProfit: Math.round(yesProfit * 100) / 100,
     noProfit: Math.round(noProfit * 100) / 100,
     yesPrice: yesAsk,
     noPrice: noAsk,
+    yesBid: yesBid,
+    noBid: noBid,
     volume: market.volume || 0,
     status: market.status,
-    expirationTime: market.expirationTime || null, // Unix timestamp
+    isResolved: isResolved,
+    resolution: resolution,
+    expirationTime: market.expirationTime || null,
     closeTime: market.closeTime || null,
-    // Outcome token mints for trading
-    yesMint,
-    noMint,
-    // Keep raw accounts for debugging
+    is15MinMarket: market.is15MinMarket || false,
+    yesMint: settlementAccount?.yesMint || null,
+    noMint: settlementAccount?.noMint || null,
     accounts: market.accounts || null,
   };
 }
 
-/**
- * Check if a word appears as a standalone word in text (not part of another word)
- * @param {string} text - Text to search in
- * @param {string} word - Word to find
- * @returns {boolean}
- */
 function hasStandaloneWord(text, word) {
   const regex = new RegExp(`\\b${word}\\b`, 'i');
   return regex.test(text);
 }
 
-/**
- * Determine category from market ticker and title
- * @param {Object} market - Market object with ticker and title
- * @returns {string} Category name
- */
 function getCategoryFromMarket(market) {
   const ticker = (market.ticker || '').toUpperCase();
   const title = (market.title || '').toLowerCase();
 
-  // Crypto - check both ticker and title
+  // Crypto
   if (ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL') || ticker.includes('CRYPTO')) return 'Crypto';
   if (title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana') || title.includes('crypto')) return 'Crypto';
 
-  // Sports - check BEFORE tech to prioritize sports keywords
-  // Ticker-based detection
+  // Sports
   if (ticker.includes('NFL') || ticker.includes('KXSB')) return 'Sports';
   if (ticker.includes('NBA') || ticker.includes('WNBA')) return 'Sports';
   if (ticker.includes('NCAA') || ticker.includes('MLB') || ticker.includes('NHL')) return 'Sports';
@@ -343,34 +246,19 @@ function getCategoryFromMarket(market) {
   if (ticker.includes('MLS') || ticker.includes('FIFA')) return 'Sports';
   if (ticker.includes('BOXING') || ticker.includes('UFC') || ticker.includes('MMA')) return 'Sports';
   if (ticker.includes('F1') || ticker.includes('NASCAR')) return 'Sports';
-
-  // Title-based detection - team sports
   if (title.includes('basketball') || title.includes('football') || title.includes('baseball')) return 'Sports';
   if (title.includes('tennis') || title.includes('boxing') || title.includes('ufc')) return 'Sports';
-
-  // Golf
   if (title.includes('golf') || title.includes(' pga') || title.includes('lpga')) return 'Sports';
   if (title.includes('masters') || title.includes('farmers insurance open')) return 'Sports';
-  if (title.includes('us open') && !title.includes('stock')) return 'Sports'; // US Open golf/tennis, not stock market
-
-  // Hockey
+  if (title.includes('us open') && !title.includes('stock')) return 'Sports';
   if (title.includes('hockey') || title.includes(' nhl') || title.includes('stanley cup')) return 'Sports';
-
-  // Soccer
   if (title.includes('soccer') || title.includes(' mls') || title.includes('premier league')) return 'Sports';
   if (title.includes('world cup') || title.includes('champions league')) return 'Sports';
-
-  // Racing
   if (title.includes('formula 1') || title.includes(' f1 ') || title.includes('nascar')) return 'Sports';
   if (title.includes('grand prix') || title.includes('racing')) return 'Sports';
-
-  // General sports patterns
   if (title.includes('tournament') || title.includes('championship')) return 'Sports';
   if (title.includes('playoffs') || title.includes('super bowl') || title.includes('finals')) return 'Sports';
-
-  // "Will X win the Y" pattern - often sports (tournaments, matches, etc.)
   if (/will .+ win the .+/i.test(title)) {
-    // But exclude political wins
     if (!title.includes('election') && !title.includes('vote') && !title.includes('president')) {
       return 'Sports';
     }
@@ -387,11 +275,9 @@ function getCategoryFromMarket(market) {
   if (title.includes('senate') || title.includes('house') || title.includes('congress') || title.includes('governor')) return 'Politics';
   if (title.includes('vote') || title.includes('ballot') || title.includes('primary')) return 'Politics';
 
-  // Tech - use standalone word matching for "AI" to avoid false positives
+  // Tech
   if (ticker.includes('LLM')) return 'Tech';
-  // Check for "AI" as standalone word in ticker (e.g., "KXAI" but not "FAIR")
   if (/\bAI\b/.test(ticker)) return 'Tech';
-  // Title checks - be specific about AI
   if (title.includes('artificial intelligence')) return 'Tech';
   if (hasStandaloneWord(title, 'ai') || title.includes(' ai ') || title.includes(' ai?') || title.includes(' ai.')) return 'Tech';
   if (title.includes('chatgpt') || title.includes('openai') || title.includes('llm') || title.includes('gpt-')) return 'Tech';
@@ -406,15 +292,9 @@ function getCategoryFromMarket(market) {
   return 'Other';
 }
 
-/**
- * Interleave markets so the same category NEVER appears consecutively
- * @param {Array} markets - Array of market objects with category field
- * @returns {Array} Interleaved array of markets
- */
 function interleaveByCategory(markets) {
   if (markets.length <= 1) return markets;
 
-  // Group markets by category
   const byCategory = {};
   for (const market of markets) {
     const cat = market.category || 'Other';
@@ -425,21 +305,16 @@ function interleaveByCategory(markets) {
   const result = [];
   let lastCategory = null;
 
-  // Keep picking markets, always from a different category than the last one
   while (Object.values(byCategory).some(arr => arr.length > 0)) {
-    // Get categories that still have markets and are different from last
     const availableCategories = Object.keys(byCategory).filter(
       cat => byCategory[cat].length > 0 && cat !== lastCategory
     );
 
     let chosenCategory;
-
     if (availableCategories.length > 0) {
-      // Pick from available categories (round-robin style, prioritize those with most markets)
       availableCategories.sort((a, b) => byCategory[b].length - byCategory[a].length);
       chosenCategory = availableCategories[0];
     } else {
-      // Only one category left with markets - have to use it
       chosenCategory = Object.keys(byCategory).find(cat => byCategory[cat].length > 0);
       if (!chosenCategory) break;
     }
@@ -453,111 +328,28 @@ function interleaveByCategory(markets) {
 
 /**
  * Fetch and transform markets for the app
- * @param {Object} options - Query options
- * @returns {Promise<Array>} Array of transformed markets
  */
 export async function getMarketsForApp({ limit = 100 } = {}) {
-  console.log('[DEBUG-MARKETS] getMarketsForApp called, fetching with include15MinCrypto=true');
   const rawMarkets = await fetchActiveMarkets({ limit, include15MinCrypto: true });
-
-  console.log('[DFlow] Raw markets count:', rawMarkets.length);
-
-  const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-
-  // Log raw crypto-related markets before filtering
-  const cryptoRaw = rawMarkets.filter(m => {
-    const ticker = (m.ticker || '').toUpperCase();
-    const title = (m.title || '').toLowerCase();
-    return ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL') ||
-           title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana') || title.includes('crypto');
-  });
-  console.log('[DFlow] Raw crypto-related markets:', cryptoRaw.length);
-  if (cryptoRaw.length > 0) {
-    console.log('[DFlow] Sample crypto markets:', cryptoRaw.slice(0, 5).map(m => ({
-      ticker: m.ticker,
-      title: m.title,
-      status: m.status,
-      hasUsdc: !!m.accounts?.[USDC_MINT],
-      hasPricing: !!(m.yesAsk && m.noAsk),
-      yesAsk: m.yesAsk,
-      noAsk: m.noAsk,
-    })));
-  }
 
   // Filter for valid, binary YES/NO markets with pricing
   const validMarkets = rawMarkets.filter(m => {
-    const ticker = (m.ticker || '').toUpperCase();
-    const title = (m.title || '').toLowerCase();
-    const isCrypto = ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL') ||
-                     title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana');
-
-    // Must have USDC settlement with token mints
     const usdcAccount = m.accounts?.[USDC_MINT];
-    if (!usdcAccount?.yesMint || !usdcAccount?.noMint) {
-      if (isCrypto) console.log('[DFlow] Crypto market filtered (no USDC mints):', m.ticker, m.title?.substring(0, 40));
-      return false;
-    }
+    if (!usdcAccount?.yesMint || !usdcAccount?.noMint) return false;
+    if (!m.yesAsk || !m.noAsk) return false;
+    if (m.status !== 'active') return false;
 
-    // Must have pricing
-    if (!m.yesAsk || !m.noAsk) {
-      if (isCrypto) console.log('[DFlow] Crypto market filtered (no pricing):', m.ticker, m.title?.substring(0, 40));
-      return false;
-    }
-
-    // Must be active
-    if (m.status !== 'active') {
-      if (isCrypto) console.log('[DFlow] Crypto market filtered (not active):', m.ticker, m.status);
-      return false;
-    }
-
-    // Binary filter: title must be a YES/NO question
-    // Allow: "Will X?" and "X price up in next 15 mins?" patterns
     const titleLower = (m.title || '').toLowerCase().trim();
     const isWillQuestion = titleLower.startsWith('will ');
     const is15MinQuestion = titleLower.includes('price up in next 15 mins') || titleLower.includes('price down in next 15 mins');
-
-    // DEBUG: Log 15-min market title pattern check
-    if (m.is15MinMarket) {
-      console.log('[DEBUG-CRYPTO15M] Title filter check for:', m.ticker);
-      console.log('[DEBUG-CRYPTO15M]   title:', m.title);
-      console.log('[DEBUG-CRYPTO15M]   isWillQuestion:', isWillQuestion);
-      console.log('[DEBUG-CRYPTO15M]   is15MinQuestion:', is15MinQuestion);
-      console.log('[DEBUG-CRYPTO15M]   PASSES:', isWillQuestion || is15MinQuestion);
-    }
-
-    if (!isWillQuestion && !is15MinQuestion) {
-      if (isCrypto) console.log('[DFlow] Crypto market filtered (not a binary question):', m.ticker, m.title?.substring(0, 50));
-      return false;
-    }
-
-    return true;
+    return isWillQuestion || is15MinQuestion;
   });
 
-  console.log('[DFlow] Valid binary markets:', validMarkets.length);
+  debug('[Markets] Valid binary markets:', validMarkets.length);
 
-  // Log valid crypto markets that passed filters
-  const validCrypto = validMarkets.filter(m => {
-    const ticker = (m.ticker || '').toUpperCase();
-    const title = (m.title || '').toLowerCase();
-    return ticker.includes('BTC') || ticker.includes('ETH') || ticker.includes('SOL') ||
-           title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana');
-  });
-  console.log('[DFlow] Valid crypto markets after filtering:', validCrypto.length);
-  if (validCrypto.length > 0) {
-    console.log('[DFlow] Valid crypto market samples:', validCrypto.slice(0, 3).map(m => ({ ticker: m.ticker, title: m.title?.substring(0, 40) })));
-  }
-
-  // Transform ALL valid markets first (so we can categorize them)
   const allTransformed = validMarkets.map(m => transformMarket(m));
 
-  // Log raw category distribution
-  const rawCategoryCount = {};
-  allTransformed.forEach(m => {
-    rawCategoryCount[m.category] = (rawCategoryCount[m.category] || 0) + 1;
-  });
-  console.log('[DFlow] Raw category distribution:', rawCategoryCount);
-
-  // Sort each category by expiration (soonest first)
+  // Group by category and sort by expiration
   const byCategory = {};
   for (const market of allTransformed) {
     const cat = market.category || 'Other';
@@ -565,7 +357,6 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
     byCategory[cat].push(market);
   }
 
-  // Sort each category by expiration
   for (const cat of Object.keys(byCategory)) {
     byCategory[cat].sort((a, b) => {
       const expA = a.expirationTime || Infinity;
@@ -574,62 +365,32 @@ export async function getMarketsForApp({ limit = 100 } = {}) {
     });
   }
 
-  // Take up to 20 markets from each category (ensuring diversity)
+  // Take up to 20 per category
   const selected = [];
   const maxPerCategory = 20;
   for (const cat of Object.keys(byCategory)) {
     selected.push(...byCategory[cat].slice(0, maxPerCategory));
   }
 
-  // Log selected category distribution
-  const categoryCount = {};
-  selected.forEach(m => {
-    categoryCount[m.category] = (categoryCount[m.category] || 0) + 1;
-  });
-  console.log('[DFlow] Selected category distribution:', categoryCount);
+  debug('[Markets] Selected:', selected.length, 'markets from', Object.keys(byCategory).length, 'categories');
 
-  // Interleave markets so the same category never appears consecutively
-  const interleaved = interleaveByCategory(selected);
-
-  return interleaved;
+  return interleaveByCategory(selected);
 }
 
 /**
- * Place a bet via DFlow Trade API
- * @param {Object} options - Bet options
- * @param {Object} options.market - Market object with yesMint/noMint
- * @param {string} options.side - 'yes' or 'no'
- * @param {number} options.amount - Amount in USDC (e.g., 0.01)
- * @param {string} options.userPublicKey - User's Solana wallet address
- * @returns {Promise<Object>} Order response with transaction data
- */
-/**
  * Fetch user's prediction market positions using DFlow API
- * Step 1: Get user's token accounts from Solana
- * Step 2: Filter for prediction market tokens via DFlow API
- * Step 3: Get market details for those tokens
- * @param {string} userPublicKey - User's Solana wallet address
- * @returns {Promise<Array>} Array of positions with market info and amounts
  */
 export async function fetchUserPositionsOnChain(userPublicKey) {
-  if (!userPublicKey) {
-    console.log('[DEBUG-HISTORY] fetchUserPositionsOnChain called with NO wallet address');
-    return [];
-  }
+  if (!userPublicKey) return [];
 
   const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
-
-  // Use proxy for DFlow API calls
   const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
   const proxyBase = isDev ? 'http://localhost:3001' : '';
 
   try {
-    console.log('[DEBUG-HISTORY] ========================================');
-    console.log('[DEBUG-HISTORY] fetchUserPositionsOnChain STARTING');
-    console.log('[DEBUG-HISTORY] Wallet address being queried:', userPublicKey);
-    console.log('[DEBUG-HISTORY] Proxy base URL:', proxyBase);
+    debug('[Positions] Fetching for:', userPublicKey?.slice(0, 8) + '...');
 
-    // Step 1: Fetch all token accounts for the user (both Token Program and Token-2022)
+    // Fetch all token accounts (Token Program and Token-2022)
     const [tokenResponse, token2022Response] = await Promise.all([
       fetch(HELIUS_RPC, {
         method: 'POST',
@@ -638,11 +399,7 @@ export async function fetchUserPositionsOnChain(userPublicKey) {
           jsonrpc: '2.0',
           id: 1,
           method: 'getTokenAccountsByOwner',
-          params: [
-            userPublicKey,
-            { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
-            { encoding: 'jsonParsed' }
-          ]
+          params: [userPublicKey, { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' }, { encoding: 'jsonParsed' }]
         })
       }),
       fetch(HELIUS_RPC, {
@@ -652,11 +409,7 @@ export async function fetchUserPositionsOnChain(userPublicKey) {
           jsonrpc: '2.0',
           id: 2,
           method: 'getTokenAccountsByOwner',
-          params: [
-            userPublicKey,
-            { programId: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb' }, // Token-2022
-            { encoding: 'jsonParsed' }
-          ]
+          params: [userPublicKey, { programId: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb' }, { encoding: 'jsonParsed' }]
         })
       })
     ]);
@@ -669,124 +422,66 @@ export async function fetchUserPositionsOnChain(userPublicKey) {
       ...(token2022Data.result?.value || [])
     ];
 
-    console.log('[DEBUG-HISTORY] Token Program accounts:', tokenData.result?.value?.length || 0);
-    console.log('[DEBUG-HISTORY] Token-2022 accounts:', token2022Data.result?.value?.length || 0);
-    console.log('[DEBUG-HISTORY] Total token accounts found:', allAccounts.length);
-
-    if (allAccounts.length === 0) {
-      console.log('[DEBUG-HISTORY] NO token accounts found for this wallet');
-      return [];
-    }
+    if (allAccounts.length === 0) return [];
 
     // Extract mints with non-zero balances
     const mintBalances = new Map();
     for (const account of allAccounts) {
       const parsed = account.account?.data?.parsed?.info;
       if (!parsed) continue;
-
       const mint = parsed.mint;
-      const tokenAmount = parsed.tokenAmount;
-
-      // Log raw token data for debugging
-      console.log('[DEBUG-HISTORY] Token account:', {
-        mint: mint?.substring(0, 10) + '...',
-        rawAmount: tokenAmount?.amount,
-        uiAmount: tokenAmount?.uiAmount,
-        decimals: tokenAmount?.decimals,
-      });
-
-      // Use uiAmount which is already decimal-adjusted
-      const amount = parseFloat(tokenAmount?.uiAmount || 0);
-
+      const amount = parseFloat(parsed.tokenAmount?.uiAmount || 0);
       if (amount > 0) {
         mintBalances.set(mint, {
           amount,
-          rawAmount: tokenAmount?.amount,
-          decimals: tokenAmount?.decimals,
+          rawAmount: parsed.tokenAmount?.amount,
+          decimals: parsed.tokenAmount?.decimals,
           tokenAccount: account.pubkey,
         });
       }
     }
 
-    if (mintBalances.size === 0) {
-      console.log('[DEBUG-HISTORY] No non-zero token balances found');
-      return [];
-    }
+    if (mintBalances.size === 0) return [];
 
-    console.log('[DEBUG-HISTORY] Tokens with non-zero balances:', mintBalances.size);
-    console.log('[DEBUG-HISTORY] All mint addresses:', Array.from(mintBalances.keys()));
+    debug('[Positions] Found', mintBalances.size, 'tokens with balance');
 
-    // Step 2: Filter for prediction market tokens via DFlow API
+    // Filter for prediction market tokens
     const allMints = Array.from(mintBalances.keys());
-    console.log('[DEBUG-HISTORY] Calling filter_outcome_mints with', allMints.length, 'mints');
-
     const filterResponse = await fetch(`${proxyBase}/api/filter-mints`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ addresses: allMints })
     });
 
-    console.log('[DEBUG-HISTORY] filter_outcome_mints response status:', filterResponse.status);
-
-    if (!filterResponse.ok) {
-      const errorText = await filterResponse.text();
-      console.log('[DEBUG-HISTORY] filter_outcome_mints FAILED:', filterResponse.status, errorText);
-      return [];
-    }
+    if (!filterResponse.ok) return [];
 
     const filterData = await filterResponse.json();
     const outcomeMints = filterData.outcomeMints || [];
 
-    console.log('[DEBUG-HISTORY] filter_outcome_mints raw response:', JSON.stringify(filterData));
-    console.log('[DEBUG-HISTORY] Prediction market tokens found:', outcomeMints.length);
-    console.log('[DEBUG-HISTORY] Outcome mint addresses:', outcomeMints);
+    if (outcomeMints.length === 0) return [];
 
-    if (outcomeMints.length === 0) {
-      console.log('[DEBUG-HISTORY] NO prediction market tokens found in wallet');
-      return [];
-    }
+    debug('[Positions] Prediction market tokens:', outcomeMints.length);
 
-    // Step 3: Get market details for those mints
-    console.log('[DEBUG-HISTORY] Calling markets/batch with mints:', outcomeMints);
-
+    // Get market details
     const marketsResponse = await fetch(`${proxyBase}/api/markets-batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mints: outcomeMints })
     });
 
-    console.log('[DEBUG-HISTORY] markets/batch response status:', marketsResponse.status);
-
-    if (!marketsResponse.ok) {
-      const errorText = await marketsResponse.text();
-      console.log('[DEBUG-HISTORY] markets/batch FAILED:', marketsResponse.status, errorText);
-      return [];
-    }
+    if (!marketsResponse.ok) return [];
 
     const marketsData = await marketsResponse.json();
     const markets = marketsData.markets || [];
 
-    console.log('[DEBUG-HISTORY] markets/batch raw response:', JSON.stringify(marketsData).substring(0, 500));
-    console.log('[DEBUG-HISTORY] Markets returned:', markets.length);
-    console.log('[DEBUG-HISTORY] Market tickers:', markets.map(m => m.ticker));
-
-    // Build positions from markets
+    // Build positions
     const positions = [];
     for (const market of markets) {
       const usdcAccount = market.accounts?.[USDC_MINT];
-      console.log('[DEBUG-HISTORY] Processing market:', market.ticker, 'hasUSDC:', !!usdcAccount);
+      if (!usdcAccount) continue;
 
-      if (!usdcAccount) {
-        console.log('[DEBUG-HISTORY] Skipping market (no USDC account):', market.ticker);
-        continue;
-      }
-
-      // Check if user has YES tokens
       if (usdcAccount.yesMint && mintBalances.has(usdcAccount.yesMint)) {
         const balance = mintBalances.get(usdcAccount.yesMint);
-        console.log('[DEBUG-HISTORY] YES position in', market.ticker);
-        console.log('[DEBUG-HISTORY]   uiAmount:', balance.amount, '| rawAmount:', balance.rawAmount, '| decimals:', balance.decimals);
-        console.log('[DEBUG-HISTORY]   market.yesAsk:', market.yesAsk, '| market.yesBid:', market.yesBid);
         positions.push({
           market: transformMarket(market),
           choice: 'yes',
@@ -799,12 +494,8 @@ export async function fetchUserPositionsOnChain(userPublicKey) {
         });
       }
 
-      // Check if user has NO tokens
       if (usdcAccount.noMint && mintBalances.has(usdcAccount.noMint)) {
         const balance = mintBalances.get(usdcAccount.noMint);
-        console.log('[DEBUG-HISTORY] NO position in', market.ticker);
-        console.log('[DEBUG-HISTORY]   uiAmount:', balance.amount, '| rawAmount:', balance.rawAmount, '| decimals:', balance.decimals);
-        console.log('[DEBUG-HISTORY]   market.noAsk:', market.noAsk, '| market.noBid:', market.noBid);
         positions.push({
           market: transformMarket(market),
           choice: 'no',
@@ -818,76 +509,441 @@ export async function fetchUserPositionsOnChain(userPublicKey) {
       }
     }
 
-    console.log('[DEBUG-HISTORY] ========================================');
-    console.log('[DEBUG-HISTORY] FINAL: Found', positions.length, 'on-chain positions');
-    console.log('[DEBUG-HISTORY] Position details:', positions.map(p => ({
-      market: p.market.title?.substring(0, 30),
-      choice: p.choice,
-      amount: p.amount,
-    })));
+    debug('[Positions] Built', positions.length, 'positions');
     return positions;
   } catch (error) {
-    console.error('[DFlow] Failed to fetch on-chain positions:', error);
+    logError('[Positions] Error:', error.message);
     return [];
   }
 }
 
+/**
+ * Place a bet via DFlow Trade API
+ */
 export async function placeBet({ market, side, amount, userPublicKey }) {
-  console.log('[DFlow] Placing bet:', { market: market.id, side, amount, userPublicKey });
-
-  // Get the appropriate outcome token mint based on side
   let outputMint = side === 'yes' ? market.yesMint : market.noMint;
 
-  // If mint not available, try fetching market details
   if (!outputMint) {
-    console.log('[DFlow] Token mint not found, fetching market details...');
     const details = await getMarketDetails(market.id);
     if (details) {
-      // Get USDC settlement account or fall back to first account
       const usdcAccount = details.accounts?.[USDC_MINT];
       const fallbackAccount = Object.values(details.accounts || {})[0];
       const settlementAccount = usdcAccount || fallbackAccount;
-
-      const yesMint = settlementAccount?.yesMint;
-      const noMint = settlementAccount?.noMint;
-      outputMint = side === 'yes' ? yesMint : noMint;
-      console.log('[DFlow] Got mints from details - YES:', yesMint, 'NO:', noMint);
+      outputMint = side === 'yes' ? settlementAccount?.yesMint : settlementAccount?.noMint;
     }
   }
 
   if (!outputMint) {
-    console.error('[DFlow] No outcome token mint found for', side, 'Market:', market);
     throw new Error(`No ${side} token mint found for this market`);
   }
 
-  // USDC has 6 decimals
   const amountInSmallestUnit = Math.floor(amount * 1_000_000);
-  console.log('[DFlow] Amount calculation:', { amountUSDC: amount, amountInSmallestUnit, outputMint });
 
   const queryParams = new URLSearchParams();
   queryParams.append('inputMint', USDC_MINT);
   queryParams.append('outputMint', outputMint);
   queryParams.append('amount', amountInSmallestUnit.toString());
-  queryParams.append('slippageBps', '100'); // 1% slippage
+  queryParams.append('slippageBps', '100');
   queryParams.append('userPublicKey', userPublicKey);
 
-  // Use local/Vercel proxy instead of direct API call (avoids CORS)
   const isProduction = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
   const proxyBase = isProduction ? '/api/dflow-order' : 'http://localhost:3001/api/dflow-order';
-
-  // Build proxy URL with same query params
   const proxyUrl = `${proxyBase}?${queryParams.toString()}`;
-  console.log('[DFlow] Using proxy:', proxyUrl);
 
   const response = await fetch(proxyUrl);
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('[DFlow] Order failed:', response.status, errorText);
     throw new Error(`Order failed: ${response.status} - ${errorText}`);
   }
 
-  const orderData = await response.json();
+  return await response.json();
+}
 
-  console.log('[DFlow] Order response:', orderData);
-  return orderData;
+/**
+ * Redeem winning outcome tokens for USDC
+ */
+export async function redeemWinnings({ tokenMint, amount, userPublicKey }) {
+  if (!tokenMint) {
+    throw new Error('No token mint provided for redemption');
+  }
+
+  const amountInSmallestUnit = Math.floor(amount * 1_000_000);
+
+  const queryParams = new URLSearchParams();
+  queryParams.append('inputMint', tokenMint);
+  queryParams.append('outputMint', USDC_MINT);
+  queryParams.append('amount', amountInSmallestUnit.toString());
+  queryParams.append('slippageBps', '100');
+  queryParams.append('userPublicKey', userPublicKey);
+
+  const isProduction = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+  const proxyBase = isProduction ? '/api/dflow-order' : 'http://localhost:3001/api/dflow-order';
+  const proxyUrl = `${proxyBase}?${queryParams.toString()}`;
+
+  const response = await fetch(proxyUrl);
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Redemption failed: ${response.status} - ${errorText}`);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Find all redeemable winning positions in a user's wallet
+ */
+export async function findRedeemableWinnings(userPublicKey) {
+  const positions = await fetchUserPositionsOnChain(userPublicKey);
+
+  const redeemable = positions.filter(pos => {
+    const result = pos.market.resolution;
+    if (!result) return false;
+    const userWon = (pos.choice === 'yes' && result === 'yes') ||
+                    (pos.choice === 'no' && result === 'no');
+    return userWon && pos.amount > 0;
+  });
+
+  return redeemable.map(pos => ({
+    tokenMint: pos.tokenMint,
+    amount: pos.amount,
+    market: pos.market,
+    choice: pos.choice,
+    value: pos.amount,
+  }));
+}
+
+/**
+ * Find all closeable token accounts (worthless losing position tokens)
+ * These are token accounts that hold prediction market tokens where:
+ * - The market has resolved
+ * - The user bet on the losing side (tokens are now worthless)
+ * - Closing returns ~0.002 SOL rent per account
+ *
+ * @param {string} userPublicKey - User's Solana wallet address
+ * @returns {Promise<Array>} Array of closeable accounts with tokenAccount address and program
+ */
+export async function findCloseableAccounts(userPublicKey) {
+  if (!userPublicKey) return [];
+
+  const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
+  const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  const proxyBase = isDev ? 'http://localhost:3001' : '';
+
+  const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+  const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+
+  try {
+    debug('[Cleanup] Finding closeable accounts for:', userPublicKey?.slice(0, 8) + '...');
+
+    // Fetch all token accounts (both programs)
+    const [tokenResponse, token2022Response] = await Promise.all([
+      fetch(HELIUS_RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getTokenAccountsByOwner',
+          params: [userPublicKey, { programId: TOKEN_PROGRAM }, { encoding: 'jsonParsed' }]
+        })
+      }),
+      fetch(HELIUS_RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'getTokenAccountsByOwner',
+          params: [userPublicKey, { programId: TOKEN_2022_PROGRAM }, { encoding: 'jsonParsed' }]
+        })
+      })
+    ]);
+
+    const tokenData = await tokenResponse.json();
+    const token2022Data = await token2022Response.json();
+
+    // Collect all accounts with their program info
+    const allAccounts = [
+      ...(tokenData.result?.value || []).map(a => ({ ...a, programId: TOKEN_PROGRAM })),
+      ...(token2022Data.result?.value || []).map(a => ({ ...a, programId: TOKEN_2022_PROGRAM }))
+    ];
+
+    if (allAccounts.length === 0) return [];
+
+    // Extract all mints (regardless of balance - we want to find worthless ones)
+    const accountsByMint = new Map();
+    for (const account of allAccounts) {
+      const parsed = account.account?.data?.parsed?.info;
+      if (!parsed) continue;
+
+      const mint = parsed.mint;
+      const amount = parseFloat(parsed.tokenAmount?.uiAmount || 0);
+
+      // Store account info
+      accountsByMint.set(mint, {
+        mint,
+        amount,
+        rawAmount: parsed.tokenAmount?.amount,
+        tokenAccount: account.pubkey,
+        programId: account.programId,
+      });
+    }
+
+    // Get all mints to check which are prediction market tokens
+    const allMints = Array.from(accountsByMint.keys());
+
+    const filterResponse = await fetch(`${proxyBase}/api/filter-mints`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ addresses: allMints })
+    });
+
+    if (!filterResponse.ok) return [];
+
+    const filterData = await filterResponse.json();
+    const outcomeMints = new Set(filterData.outcomeMints || []);
+
+    if (outcomeMints.size === 0) return [];
+
+    // Get market details for prediction tokens
+    const marketsResponse = await fetch(`${proxyBase}/api/markets-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mints: Array.from(outcomeMints) })
+    });
+
+    if (!marketsResponse.ok) return [];
+
+    const marketsData = await marketsResponse.json();
+    const markets = marketsData.markets || [];
+
+    // Build map of mint -> market info + which side
+    const mintToMarket = new Map();
+    for (const market of markets) {
+      const usdcAccount = market.accounts?.[USDC_MINT];
+      if (!usdcAccount) continue;
+
+      if (usdcAccount.yesMint) {
+        mintToMarket.set(usdcAccount.yesMint, { market, side: 'yes' });
+      }
+      if (usdcAccount.noMint) {
+        mintToMarket.set(usdcAccount.noMint, { market, side: 'no' });
+      }
+    }
+
+    // Find closeable accounts: prediction tokens where market resolved against user
+    const closeableAccounts = [];
+
+    for (const [mint, accountInfo] of accountsByMint) {
+      if (!outcomeMints.has(mint)) continue;
+
+      const marketInfo = mintToMarket.get(mint);
+      if (!marketInfo) continue;
+
+      const { market, side } = marketInfo;
+      const result = market.result || market.resolution;
+
+      // Only closeable if market resolved AND user lost
+      if (!result) continue;
+
+      const userLost = (side === 'yes' && result === 'no') ||
+                       (side === 'no' && result === 'yes');
+
+      if (userLost) {
+        closeableAccounts.push({
+          tokenAccount: accountInfo.tokenAccount,
+          mint: accountInfo.mint,
+          programId: accountInfo.programId,
+          amount: accountInfo.amount,
+          market: {
+            ticker: market.ticker,
+            title: market.title,
+            resolution: result,
+          },
+          side,
+        });
+      }
+    }
+
+    debug('[Cleanup] Found', closeableAccounts.length, 'closeable accounts');
+    return closeableAccounts;
+  } catch (error) {
+    logError('[Cleanup] Error finding closeable accounts:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Build a transaction to close multiple token accounts
+ * Returns the serialized transaction for signing
+ *
+ * SPL Token CloseAccount requires zero balance, so we burn tokens first if needed.
+ *
+ * @param {Array} accounts - Array of { tokenAccount, mint, programId, rawAmount } objects
+ * @param {string} ownerPublicKey - The wallet that owns these accounts
+ * @returns {Promise<string>} Base64 encoded transaction
+ */
+export async function buildCloseAccountsTransaction(accounts, ownerPublicKey) {
+  const { Connection, PublicKey, Transaction, TransactionInstruction } = await import('@solana/web3.js');
+
+  const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
+  const connection = new Connection(HELIUS_RPC, 'confirmed');
+
+  const owner = new PublicKey(ownerPublicKey);
+  const transaction = new Transaction();
+
+  for (const acc of accounts) {
+    const tokenAccount = new PublicKey(acc.tokenAccount);
+    const mint = new PublicKey(acc.mint);
+    const programId = new PublicKey(acc.programId);
+    const rawAmount = BigInt(acc.rawAmount || '0');
+
+    // If account has tokens, burn them first (CloseAccount requires zero balance)
+    if (rawAmount > 0n) {
+      // Burn instruction (index 8): burn tokens to reduce balance to zero
+      // Accounts: [0] token account, [1] mint, [2] authority
+      // Data: [8, u64 amount in little endian]
+      const amountBuffer = Buffer.alloc(8);
+      amountBuffer.writeBigUInt64LE(rawAmount);
+
+      const burnInstruction = new TransactionInstruction({
+        keys: [
+          { pubkey: tokenAccount, isSigner: false, isWritable: true },  // Token account
+          { pubkey: mint, isSigner: false, isWritable: true },          // Mint
+          { pubkey: owner, isSigner: true, isWritable: false },         // Authority
+        ],
+        programId,
+        data: Buffer.concat([Buffer.from([8]), amountBuffer]), // Burn instruction
+      });
+
+      transaction.add(burnInstruction);
+    }
+
+    // CloseAccount instruction (index 9)
+    // Accounts: [0] account to close, [1] destination for rent, [2] authority
+    const closeInstruction = new TransactionInstruction({
+      keys: [
+        { pubkey: tokenAccount, isSigner: false, isWritable: true },
+        { pubkey: owner, isSigner: false, isWritable: true },
+        { pubkey: owner, isSigner: true, isWritable: false },
+      ],
+      programId,
+      data: Buffer.from([9]),
+    });
+
+    transaction.add(closeInstruction);
+  }
+
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = owner;
+
+  const serialized = transaction.serialize({ requireAllSignatures: false });
+  return Buffer.from(serialized).toString('base64');
+}
+
+/**
+ * Backfill cost basis data for old bets that stored incorrect values.
+ * The bug stored tokenCount as costBasis instead of actual USDC spent.
+ * This function fetches transaction history to find the real USDC amounts.
+ */
+export async function backfillCostBasis(walletAddress) {
+  const HELIUS_API_KEY = 'fc70f382-f7ec-48d3-a615-9bacd782570e';
+  const STORAGE_KEY = 'instinkt_cost_basis';
+  const BACKFILL_FLAG = 'instinkt_cost_basis_backfilled';
+
+  // Check if already backfilled
+  if (localStorage.getItem(BACKFILL_FLAG) === 'true') {
+    debug('[Backfill] Already completed');
+    return { fixed: 0, skipped: true };
+  }
+
+  if (!walletAddress) {
+    return { fixed: 0, error: 'No wallet address' };
+  }
+
+  try {
+    // Fetch transaction history from Helius
+    const url = `https://api.helius.xyz/v0/addresses/${walletAddress}/transactions?api-key=${HELIUS_API_KEY}&limit=100`;
+    const response = await fetch(url);
+    const transactions = await response.json();
+
+    if (!Array.isArray(transactions)) {
+      return { fixed: 0, error: 'Invalid transaction data' };
+    }
+
+    // Build a map of tokenMint -> actual USDC spent from transaction history
+    const actualCosts = {};
+
+    for (const tx of transactions) {
+      const transfers = tx.tokenTransfers || [];
+
+      // Find USDC out transfer (what user paid)
+      const usdcOut = transfers.find(t =>
+        t.fromUserAccount === walletAddress &&
+        t.mint === USDC_MINT
+      );
+
+      // Find token in transfer (what user received - prediction market token)
+      const tokenIn = transfers.find(t =>
+        t.toUserAccount === walletAddress &&
+        t.mint !== USDC_MINT
+      );
+
+      if (usdcOut && tokenIn) {
+        const usdcAmount = usdcOut.tokenAmount || 0;
+        const tokenMint = tokenIn.mint;
+
+        // Only process bet-sized transactions (0.10 to 5.00 USDC)
+        if (usdcAmount >= 0.10 && usdcAmount <= 5.00) {
+          // Accumulate costs for the same token mint (multiple bets on same position)
+          actualCosts[tokenMint] = (actualCosts[tokenMint] || 0) + usdcAmount;
+        }
+      }
+    }
+
+    // Load current cost basis data
+    const costBasisData = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+
+    let fixedCount = 0;
+    const fixes = [];
+
+    // Check each entry and fix if needed
+    for (const [tokenMint, storedCost] of Object.entries(costBasisData)) {
+      const actualCost = actualCosts[tokenMint];
+
+      if (actualCost !== undefined) {
+        // Check if stored cost looks wrong (significantly different from actual)
+        // The bug stored token count, which is usually > actual cost (e.g., 1.82 tokens vs 1.00 USDC)
+        const diff = Math.abs(storedCost - actualCost);
+        const ratio = storedCost / actualCost;
+
+        // If stored cost is notably higher than actual (ratio > 1.1 indicates bug)
+        // or if the difference is significant (> 0.05)
+        if (ratio > 1.1 || diff > 0.05) {
+          fixes.push({
+            tokenMint: tokenMint.slice(0, 8) + '...',
+            oldCost: storedCost.toFixed(4),
+            newCost: actualCost.toFixed(4)
+          });
+          costBasisData[tokenMint] = actualCost;
+          fixedCount++;
+        }
+      }
+    }
+
+    if (fixedCount > 0) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(costBasisData));
+      console.log('[Backfill] Fixed', fixedCount, 'cost basis entries:');
+      fixes.forEach(f => console.log('  ', f.tokenMint, ':', f.oldCost, '->', f.newCost));
+    }
+
+    // Mark as backfilled
+    localStorage.setItem(BACKFILL_FLAG, 'true');
+
+    return { fixed: fixedCount, fixes };
+  } catch (err) {
+    logError('[Backfill] Error:', err.message);
+    return { fixed: 0, error: err.message };
+  }
 }

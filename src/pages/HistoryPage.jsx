@@ -1,10 +1,53 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { categoryColors } from '../data/markets';
 import { useTheme } from '../context/ThemeContext';
 import LogoutButton from '../components/LogoutButton';
+import { redeemWinnings } from '../services/dflow';
+import { debug, logError } from '../utils/debug';
 
-// Theme toggle button component (same as BettingPage)
+const HELIUS_API_KEY = 'fc70f382-f7ec-48d3-a615-9bacd782570e';
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+async function fetchTotalSpent(walletAddress) {
+  if (!walletAddress) return 0;
+
+  try {
+    const url = `https://api.helius.xyz/v0/addresses/${walletAddress}/transactions?api-key=${HELIUS_API_KEY}&limit=100`;
+    const response = await fetch(url);
+    const transactions = await response.json();
+
+    if (!Array.isArray(transactions)) return 0;
+
+    let totalSpent = 0;
+    for (const tx of transactions) {
+      const usdcOut = tx.tokenTransfers?.find(t =>
+        t.fromUserAccount === walletAddress &&
+        t.mint === USDC_MINT
+      );
+      if (!usdcOut) continue;
+      const amount = usdcOut.tokenAmount || 0;
+      if (amount >= 0.10 && amount <= 5.00) {
+        totalSpent += amount;
+      }
+    }
+    return totalSpent;
+  } catch (error) {
+    logError('[History] Error fetching spent:', error.message);
+    return 0;
+  }
+}
+
+function getCostBasis(tokenMint) {
+  if (!tokenMint) return null;
+  try {
+    const costBasisData = JSON.parse(localStorage.getItem('instinkt_cost_basis') || '{}');
+    return costBasisData[tokenMint] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function ThemeToggleButton({ isDark, onToggle, colors }) {
   return (
     <button
@@ -52,17 +95,15 @@ const CATEGORIES = ['All', 'Crypto', 'Sports', 'Politics', 'Weather', 'Stocks', 
 const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first' },
-  { value: 'highest-bet', label: 'Highest bet' },
-  { value: 'lowest-bet', label: 'Lowest bet' },
-  { value: 'highest-profit', label: 'Highest profit' },
+  { value: 'most-tokens', label: 'Most tokens' },
+  { value: 'least-tokens', label: 'Least tokens' },
 ];
 
-function formatTimeRemaining(expirationTime) {
-  // expirationTime is a Unix timestamp in seconds from DFlow
-  if (!expirationTime) return 'Unknown';
+function formatTimeRemaining(timestamp) {
+  if (!timestamp) return 'Unknown';
 
   const now = Math.floor(Date.now() / 1000);
-  const remaining = Math.max(0, expirationTime - now);
+  const remaining = Math.max(0, timestamp - now);
 
   if (remaining === 0) return 'Resolving...';
 
@@ -81,18 +122,32 @@ function formatTimeRemaining(expirationTime) {
   }
 }
 
+function getMarketTime(market) {
+  const is15Min = market.is15MinMarket || (market.id && market.id.includes('15M'));
+  if (is15Min && market.closeTime) {
+    return market.closeTime;
+  }
+  return market.expirationTime;
+}
+
 function OpenPositionCard({ bet, colors }) {
   const [timeDisplay, setTimeDisplay] = useState('');
+  const isPendingResolution = bet.status === 'pending_resolution';
+  const potentialPayout = bet.tokenCount || 0;
+  const marketTime = getMarketTime(bet.market);
 
   useEffect(() => {
     const updateTime = () => {
-      // Use expirationTime from market (Unix timestamp in seconds)
-      setTimeDisplay(formatTimeRemaining(bet.market.expirationTime));
+      if (isPendingResolution) {
+        setTimeDisplay('Awaiting result');
+      } else {
+        setTimeDisplay(formatTimeRemaining(marketTime));
+      }
     };
     updateTime();
-    const interval = setInterval(updateTime, 60000); // Update every minute instead of every second
+    const interval = setInterval(updateTime, 60000);
     return () => clearInterval(interval);
-  }, [bet.market.expirationTime]);
+  }, [marketTime, isPendingResolution]);
 
   return (
     <motion.div
@@ -102,7 +157,6 @@ function OpenPositionCard({ bet, colors }) {
       className="card-comic p-4 mb-3 relative"
       style={{ backgroundColor: colors.paper, borderColor: colors.border }}
     >
-      {/* Category badge - top right */}
       <span
         className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-xs font-bold border-2"
         style={{ backgroundColor: categoryColors[bet.market.category] || '#888', borderColor: colors.border }}
@@ -110,43 +164,29 @@ function OpenPositionCard({ bet, colors }) {
         {bet.market.category}
       </span>
 
-      {/* Title */}
       <h3 className="font-bold text-lg mb-3 leading-tight pr-20" style={{ color: colors.text }}>
         {bet.market.title}
       </h3>
 
-      {/* Direction | Amount row */}
-      <div className="flex items-center gap-3 mb-3">
-        <span
-          className={`px-3 py-1 rounded-lg text-white font-bold text-sm border-2 ${
-            bet.choice === 'yes' ? 'bg-green-500' : 'bg-red-500'
-          }`}
-          style={{ borderColor: colors.border }}
-        >
-          {bet.choice.toUpperCase()}
-        </span>
-        <div>
-          <span className="font-bold text-lg" style={{ color: colors.text }}>
-            ${parseFloat(bet.amount).toFixed(2)}
-          </span>
-          {bet.tokenCount && (
-            <span className="text-xs ml-2" style={{ color: colors.textMuted }}>
-              ({bet.tokenCount} tokens)
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Time to resolution | Potential profit row */}
       <div className="flex items-center justify-between pt-3 border-t-2" style={{ borderColor: colors.backgroundSecondary }}>
         <div className="flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" stroke={colors.textMuted} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span className="text-sm font-bold" style={{ color: colors.textSecondary }}>{timeDisplay}</span>
+          <span style={{ color: colors.textSecondary, fontWeight: 'bold' }}>Bet:</span>
+          <span
+            className={`px-3 py-1 rounded-lg text-white font-bold text-sm border-2 ${
+              bet.choice === 'yes' ? 'bg-green-500' : 'bg-red-500'
+            }`}
+            style={{ borderColor: colors.border }}
+          >
+            {bet.choice.toUpperCase()}
+          </span>
         </div>
         <div className="text-right">
-          <span className="font-bold text-green-600 text-lg">+${parseFloat(bet.profit).toFixed(2)}</span>
+          <div className="text-xs" style={{ color: isPendingResolution ? '#f59e0b' : colors.textMuted }}>
+            {timeDisplay}
+          </div>
+          <span className="font-bold text-green-600 text-lg">
+            To win: ${potentialPayout.toFixed(2)}
+          </span>
         </div>
       </div>
     </motion.div>
@@ -155,7 +195,24 @@ function OpenPositionCard({ bet, colors }) {
 
 function ClosedPositionCard({ bet, colors }) {
   const won = bet.status === 'won';
-  const pnl = won ? `+$${bet.profit}` : `-$${bet.amount}`;
+  const tokenCount = bet.tokenCount || 0;
+  const costBasis = getCostBasis(bet.tokenMint);
+
+  let pnlDisplay = null;
+  if (won) {
+    if (costBasis !== null) {
+      const profit = tokenCount - costBasis;
+      pnlDisplay = <span className="font-bold text-xl text-green-600">Won +${profit.toFixed(2)}</span>;
+    } else {
+      pnlDisplay = <span className="font-bold text-xl text-green-600">Won</span>;
+    }
+  } else {
+    if (costBasis !== null) {
+      pnlDisplay = <span className="font-bold text-xl text-red-600">Lost -${costBasis.toFixed(2)}</span>;
+    } else {
+      pnlDisplay = <span className="font-bold text-xl text-red-600">Lost</span>;
+    }
+  }
 
   return (
     <motion.div
@@ -165,7 +222,6 @@ function ClosedPositionCard({ bet, colors }) {
       className="card-comic p-4 mb-3 relative"
       style={{ backgroundColor: colors.paper, borderColor: colors.border }}
     >
-      {/* Category badge - top right */}
       <span
         className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-xs font-bold border-2"
         style={{ backgroundColor: categoryColors[bet.market.category] || '#888', borderColor: colors.border }}
@@ -173,40 +229,23 @@ function ClosedPositionCard({ bet, colors }) {
         {bet.market.category}
       </span>
 
-      {/* Title */}
       <h3 className="font-bold text-lg mb-3 leading-tight pr-20" style={{ color: colors.text }}>
         {bet.market.title}
       </h3>
 
-      {/* Direction | Amount row */}
-      <div className="flex items-center gap-3 mb-3">
-        <span
-          className={`px-3 py-1 rounded-lg text-white font-bold text-sm border-2 ${
-            bet.choice === 'yes' ? 'bg-green-500' : 'bg-red-500'
-          }`}
-          style={{ borderColor: colors.border }}
-        >
-          {bet.choice.toUpperCase()}
-        </span>
-        <span className="font-bold text-lg" style={{ color: colors.text }}>
-          ${bet.amount}
-        </span>
-      </div>
-
-      {/* Outcome | PnL row */}
       <div className="flex items-center justify-between pt-3 border-t-2" style={{ borderColor: colors.backgroundSecondary }}>
-        <span
-          className={`px-3 py-1 rounded-lg font-bold text-sm border-2 ${
-            won
-              ? 'bg-green-100 text-green-700 border-green-500'
-              : 'bg-red-100 text-red-700 border-red-500'
-          }`}
-        >
-          {won ? 'WON' : 'LOST'}
-        </span>
-        <span className={`font-bold text-lg ${won ? 'text-green-600' : 'text-red-600'}`}>
-          {pnl}
-        </span>
+        <div className="flex items-center gap-2">
+          <span style={{ color: colors.textSecondary, fontWeight: 'bold' }}>Bet:</span>
+          <span
+            className={`px-3 py-1 rounded-lg text-white font-bold text-sm border-2 ${
+              bet.choice === 'yes' ? 'bg-green-500' : 'bg-red-500'
+            }`}
+            style={{ borderColor: colors.border }}
+          >
+            {bet.choice.toUpperCase()}
+          </span>
+        </div>
+        {pnlDisplay}
       </div>
     </motion.div>
   );
@@ -227,28 +266,16 @@ function FilterBar({ selectedCategory, setSelectedCategory, sortBy, setSortBy, c
 
   const getCategoryStyle = (category, isSelected) => {
     if (isSelected) {
-      return {
-        backgroundColor: colors.border,
-        color: '#fff',
-      };
+      return { backgroundColor: colors.border, color: '#fff' };
     }
-    // "All" gets theme-appropriate gray when unselected
     if (category === 'All') {
-      return {
-        backgroundColor: colors.backgroundSecondary,
-        color: colors.text,
-      };
+      return { backgroundColor: colors.backgroundSecondary, color: colors.text };
     }
-    // Other categories get their badge color
-    return {
-      backgroundColor: categoryColors[category] || colors.backgroundSecondary,
-      color: '#222',
-    };
+    return { backgroundColor: categoryColors[category] || colors.backgroundSecondary, color: '#222' };
   };
 
   return (
     <div className="mb-4 space-y-3">
-      {/* Category filter - horizontal scroll */}
       <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
         {CATEGORIES.map((category) => {
           const isSelected = selectedCategory === category;
@@ -272,7 +299,6 @@ function FilterBar({ selectedCategory, setSelectedCategory, sortBy, setSortBy, c
         })}
       </div>
 
-      {/* Sort dropdown */}
       <div className="relative">
         <motion.button
           onClick={() => setShowSortDropdown(!showSortDropdown)}
@@ -333,123 +359,165 @@ function FilterBar({ selectedCategory, setSelectedCategory, sortBy, setSortBy, c
   );
 }
 
-export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
+export default function HistoryPage({ bets, isLoadingPositions, onRefresh, walletAddress, onRedeemWinnings }) {
   const { colors, isDark, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('open');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [sortBy, setSortBy] = useState('newest');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [totalSpent, setTotalSpent] = useState(0);
+  const [isLoadingSpent, setIsLoadingSpent] = useState(false);
+  const [isRedeeming, setIsRedeeming] = useState(false);
+  const [redeemError, setRedeemError] = useState(null);
+  const [redeemSuccess, setRedeemSuccess] = useState(null);
 
-  // Debug: Log bets received from parent
-  console.log('[HistoryPage] ========================================');
-  console.log('[HistoryPage] Bets received:', bets?.length || 0);
-  console.log('[HistoryPage] isLoadingPositions:', isLoadingPositions);
-  if (bets && bets.length > 0) {
-    console.log('[HistoryPage] All bets summary:');
-    bets.forEach((b, i) => {
-      console.log(`[HistoryPage]   ${i}: ${b.market?.ticker || b.market?.title?.substring(0, 20)} | ${b.choice} | $${b.amount?.toFixed(2)} | mint: ${b.tokenMint?.substring(0, 8)}...`);
-    });
-    console.log('[HistoryPage] Total at risk (sum):', bets.reduce((sum, b) => sum + (parseFloat(b.amount) || 0), 0).toFixed(2));
-  }
+  useEffect(() => {
+    if (walletAddress) {
+      setIsLoadingSpent(true);
+      fetchTotalSpent(walletAddress)
+        .then(spent => {
+          setTotalSpent(spent);
+          setIsLoadingSpent(false);
+        })
+        .catch(() => setIsLoadingSpent(false));
+    }
+  }, [walletAddress]);
 
-  // Refresh positions from on-chain
   const handleRefresh = async () => {
     if (isRefreshing || isLoadingPositions) return;
     setIsRefreshing(true);
     try {
-      if (onRefresh) {
-        await onRefresh();
-      }
+      if (onRefresh) await onRefresh();
     } finally {
-      // Add a small delay for visual feedback
       await new Promise(resolve => setTimeout(resolve, 500));
       setIsRefreshing(false);
     }
   };
 
-  // Use real bets only
-  const allBets = useMemo(() => {
-    return bets;
-  }, [bets]);
+  const allBets = useMemo(() => bets, [bets]);
 
-  // Separate bets into open (pending) and closed (won/lost)
   const openPositions = useMemo(() => {
-    return allBets.filter(bet => bet.status === 'pending');
+    const open = allBets.filter(bet => bet.status === 'pending' || bet.status === 'pending_resolution');
+    debug('[History] Open positions:', open.length);
+    return open;
   }, [allBets]);
 
   const closedPositions = useMemo(() => {
-    return allBets.filter(bet => bet.status === 'won' || bet.status === 'lost');
+    const closed = allBets.filter(bet => bet.status === 'won' || bet.status === 'lost');
+    debug('[History] Closed positions:', closed.length);
+    return closed;
   }, [allBets]);
 
-  // Filter and sort positions - memoized to react to filter/sort changes
+  const unredeemedWinnings = useMemo(() => {
+    const wonPositions = closedPositions.filter(bet => bet.status === 'won' && bet.tokenCount > 0);
+    const totalValue = wonPositions.reduce((sum, bet) => sum + (bet.tokenCount || 0), 0);
+    debug('[History] Unredeemed winnings: $' + totalValue.toFixed(2));
+    return { positions: wonPositions, totalValue };
+  }, [closedPositions]);
+
+  const handleRedeemAll = useCallback(async () => {
+    if (isRedeeming || unredeemedWinnings.positions.length === 0) return;
+
+    setIsRedeeming(true);
+    setRedeemError(null);
+    setRedeemSuccess(null);
+
+    const results = { success: 0, failed: 0, total: unredeemedWinnings.positions.length };
+
+    for (let i = 0; i < unredeemedWinnings.positions.length; i++) {
+      const position = unredeemedWinnings.positions[i];
+      try {
+        const orderResponse = await redeemWinnings({
+          tokenMint: position.tokenMint,
+          amount: position.tokenCount,
+          userPublicKey: walletAddress,
+        });
+
+        if (!orderResponse.transaction) {
+          results.failed++;
+          continue;
+        }
+
+        if (onRedeemWinnings) {
+          const success = await onRedeemWinnings(orderResponse.transaction, position);
+          if (success) {
+            results.success++;
+          } else {
+            results.failed++;
+          }
+        } else {
+          results.failed++;
+        }
+
+        if (i < unredeemedWinnings.positions.length - 1) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      } catch (err) {
+        logError('[Redeem] Error:', err.message);
+        results.failed++;
+      }
+    }
+
+    setIsRedeeming(false);
+
+    if (results.success > 0) {
+      console.log('[Redeem] Redeemed', results.success, 'of', results.total, 'positions');
+      setRedeemSuccess(`Redeemed ${results.success} of ${results.total} positions! Refreshing...`);
+    }
+    if (results.failed > 0) {
+      setRedeemError(`${results.failed} uncertain - will verify on refresh`);
+    }
+
+    if (onRefresh) {
+      await new Promise(r => setTimeout(r, 3000));
+      await onRefresh();
+      setTimeout(() => {
+        setRedeemSuccess(null);
+        setRedeemError(null);
+      }, 2000);
+    }
+  }, [isRedeeming, unredeemedWinnings, walletAddress, onRedeemWinnings, onRefresh]);
+
   const filteredOpen = useMemo(() => {
     let filtered = openPositions;
-
-    // Filter by category
     if (selectedCategory !== 'All') {
       filtered = filtered.filter(bet => bet.market.category === selectedCategory);
     }
-
-    // Sort
     return [...filtered].sort((a, b) => {
       switch (sortBy) {
-        case 'newest':
-          return b.timestamp - a.timestamp;
-        case 'oldest':
-          return a.timestamp - b.timestamp;
-        case 'highest-bet':
-          return parseFloat(b.amount) - parseFloat(a.amount);
-        case 'lowest-bet':
-          return parseFloat(a.amount) - parseFloat(b.amount);
-        case 'highest-profit':
-          return parseFloat(b.profit) - parseFloat(a.profit);
-        default:
-          return 0;
+        case 'newest': return b.timestamp - a.timestamp;
+        case 'oldest': return a.timestamp - b.timestamp;
+        case 'most-tokens': return (b.tokenCount || 0) - (a.tokenCount || 0);
+        case 'least-tokens': return (a.tokenCount || 0) - (b.tokenCount || 0);
+        default: return 0;
       }
     });
   }, [openPositions, selectedCategory, sortBy]);
 
   const filteredClosed = useMemo(() => {
     let filtered = closedPositions;
-
-    // Filter by category
     if (selectedCategory !== 'All') {
       filtered = filtered.filter(bet => bet.market.category === selectedCategory);
     }
-
-    // Sort
     return [...filtered].sort((a, b) => {
       switch (sortBy) {
-        case 'newest':
-          return b.timestamp - a.timestamp;
-        case 'oldest':
-          return a.timestamp - b.timestamp;
-        case 'highest-bet':
-          return parseFloat(b.amount) - parseFloat(a.amount);
-        case 'lowest-bet':
-          return parseFloat(a.amount) - parseFloat(b.amount);
-        case 'highest-profit':
-          return parseFloat(b.profit) - parseFloat(a.profit);
-        default:
-          return 0;
+        case 'newest': return b.timestamp - a.timestamp;
+        case 'oldest': return a.timestamp - b.timestamp;
+        case 'most-tokens': return (b.tokenCount || 0) - (a.tokenCount || 0);
+        case 'least-tokens': return (a.tokenCount || 0) - (b.tokenCount || 0);
+        default: return 0;
       }
     });
   }, [closedPositions, selectedCategory, sortBy]);
 
   return (
     <div className="flex flex-col h-full" style={{ position: 'relative' }}>
-      {/* Theme toggle and logout buttons - positioned in header */}
       <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
       <LogoutButton />
 
-      {/* Header */}
       <header
         className="px-4 py-4 border-b-3"
-        style={{
-          backgroundColor: colors.paper,
-          borderColor: colors.border,
-          minHeight: '56px',
-        }}
+        style={{ backgroundColor: colors.paper, borderColor: colors.border, minHeight: '56px' }}
       >
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold" style={{ color: colors.text }}>My Positions</h1>
@@ -462,7 +530,7 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
               border: `2px solid ${colors.border}`,
               boxShadow: `1px 1px 0 ${colors.border}`,
               cursor: isRefreshing ? 'not-allowed' : 'pointer',
-              marginRight: '80px', // Space for theme + logout buttons
+              marginRight: '80px',
             }}
             title="Refresh positions"
           >
@@ -475,9 +543,7 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
-              style={{
-                animation: isRefreshing ? 'spin 1s linear infinite' : 'none',
-              }}
+              style={{ animation: isRefreshing ? 'spin 1s linear infinite' : 'none' }}
             >
               <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
               <path d="M3 3v5h5" />
@@ -487,7 +553,6 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
           </button>
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-2">
           <motion.button
             onClick={() => setActiveTab('open')}
@@ -540,7 +605,6 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
         </div>
       </header>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto hide-scrollbar p-4 pb-24">
         <AnimatePresence mode="wait">
           {activeTab === 'open' ? (
@@ -551,7 +615,6 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
               exit={{ opacity: 0, x: 20 }}
               transition={{ duration: 0.2 }}
             >
-              {/* Filters */}
               <FilterBar
                 selectedCategory={selectedCategory}
                 setSelectedCategory={setSelectedCategory}
@@ -561,49 +624,34 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
               />
 
               {openPositions.length === 0 ? (
-                <EmptyState
-                  icon="📊"
-                  title="No open positions"
-                  subtitle="Start betting to see your positions here!"
-                  colors={colors}
-                />
+                <EmptyState icon="📊" title="No open positions" subtitle="Start betting to see your positions here!" colors={colors} />
               ) : filteredOpen.length === 0 ? (
-                <EmptyState
-                  icon="🔍"
-                  title="No matching positions"
-                  subtitle="Try changing your filters"
-                  colors={colors}
-                />
+                <EmptyState icon="🔍" title="No matching positions" subtitle="Try changing your filters" colors={colors} />
               ) : (
                 <>
-                  {/* Summary card */}
-                  <div
-                    className="card-comic p-4 mb-4 border-3"
-                    style={{ backgroundColor: colors.paper, borderColor: colors.border }}
-                  >
+                  <div className="card-comic p-4 mb-4 border-3" style={{ backgroundColor: colors.paper, borderColor: colors.border }}>
                     <div className="flex justify-around text-center">
                       <div>
                         <div className="text-2xl font-bold" style={{ color: colors.text }}>{filteredOpen.length}</div>
-                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Active</div>
+                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Positions</div>
                       </div>
                       <div className="w-px" style={{ backgroundColor: colors.backgroundSecondary }} />
                       <div>
                         <div className="text-2xl font-bold" style={{ color: colors.text }}>
-                          ${filteredOpen.reduce((sum, b) => sum + parseFloat(b.amount), 0).toFixed(2)}
+                          {isLoadingSpent ? '...' : `$${totalSpent.toFixed(2)}`}
                         </div>
-                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Value</div>
+                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Spent</div>
                       </div>
                       <div className="w-px" style={{ backgroundColor: colors.backgroundSecondary }} />
                       <div>
                         <div className="text-2xl font-bold text-green-600">
-                          +${filteredOpen.reduce((sum, b) => sum + parseFloat(b.profit), 0).toFixed(2)}
+                          ${filteredOpen.reduce((sum, b) => sum + (b.tokenCount || 0), 0).toFixed(2)}
                         </div>
-                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Potential</div>
+                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>To Win</div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Position cards */}
                   {filteredOpen.map((bet) => (
                     <OpenPositionCard key={`${bet.market.id}-${bet.choice}-${bet.timestamp}`} bet={bet} colors={colors} />
                   ))}
@@ -618,7 +666,6 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
             >
-              {/* Filters */}
               <FilterBar
                 selectedCategory={selectedCategory}
                 setSelectedCategory={setSelectedCategory}
@@ -628,59 +675,93 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh }) {
               />
 
               {closedPositions.length === 0 ? (
-                <EmptyState
-                  icon="📜"
-                  title="No closed positions yet"
-                  subtitle="Your resolved bets will appear here."
-                  colors={colors}
-                />
+                <EmptyState icon="📜" title="No resolved trades yet" subtitle="Winning and losing bets will appear here once markets resolve." colors={colors} />
               ) : filteredClosed.length === 0 ? (
-                <EmptyState
-                  icon="🔍"
-                  title="No matching positions"
-                  subtitle="Try changing your filters"
-                  colors={colors}
-                />
+                <EmptyState icon="🔍" title="No matching positions" subtitle="Try changing your filters" colors={colors} />
               ) : (
                 <>
-                  {/* Summary card */}
-                  <div
-                    className="card-comic p-4 mb-4 border-3"
-                    style={{ backgroundColor: colors.paper, borderColor: colors.border }}
-                  >
+                  <div className="card-comic p-4 mb-4 border-3" style={{ backgroundColor: colors.paper, borderColor: colors.border }}>
                     <div className="flex justify-around text-center">
                       <div>
-                        <div className="text-2xl font-bold text-green-600">
-                          {filteredClosed.filter(b => b.status === 'won').length}
-                        </div>
-                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Won</div>
-                      </div>
-                      <div className="w-px" style={{ backgroundColor: colors.backgroundSecondary }} />
-                      <div>
-                        <div className="text-2xl font-bold text-red-600">
-                          {filteredClosed.filter(b => b.status === 'lost').length}
-                        </div>
-                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Lost</div>
-                      </div>
-                      <div className="w-px" style={{ backgroundColor: colors.backgroundSecondary }} />
-                      <div>
                         {(() => {
-                          const totalPnl = filteredClosed.reduce((sum, b) => {
-                            return sum + (b.status === 'won' ? parseFloat(b.profit) : -parseFloat(b.amount));
-                          }, 0);
-                          const isPositive = totalPnl >= 0;
+                          let netPnL = 0;
+                          let hasAnyCost = false;
+
+                          filteredClosed.forEach(b => {
+                            const cost = getCostBasis(b.tokenMint);
+                            if (cost !== null) {
+                              hasAnyCost = true;
+                              if (b.status === 'won') {
+                                netPnL += (b.tokenCount || 0) - cost;
+                              } else {
+                                netPnL -= cost;
+                              }
+                            }
+                          });
+
+                          const isPositive = netPnL >= 0;
                           return (
                             <>
                               <div className={`text-2xl font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                                {isPositive ? '+' : ''}${totalPnl.toFixed(2)}
+                                {hasAnyCost ? `${isPositive ? '+' : '-'}$${Math.abs(netPnL).toFixed(2)}` : '—'}
                               </div>
-                              <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Net PnL</div>
+                              <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Net P&L</div>
                             </>
                           );
                         })()}
                       </div>
+                      <div className="w-px" style={{ backgroundColor: colors.backgroundSecondary }} />
+                      <div>
+                        <div className="text-2xl font-bold" style={{ color: colors.text }}>{filteredClosed.length}</div>
+                        <div className="text-xs font-bold" style={{ color: colors.textMuted }}>Bets</div>
+                      </div>
                     </div>
                   </div>
+
+                  {/* Redeem Winnings Banner */}
+                  {unredeemedWinnings.totalValue > 0 && (
+                    <div
+                      className="card-comic p-4 mb-4 border-3"
+                      style={{ backgroundColor: '#ecfdf5', borderColor: '#059669' }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-lg font-bold text-green-700">
+                            ${unredeemedWinnings.totalValue.toFixed(2)} Unredeemed
+                          </div>
+                          <div className="text-xs text-green-600">
+                            {unredeemedWinnings.positions.length} winning position{unredeemedWinnings.positions.length !== 1 ? 's' : ''} ready to redeem
+                          </div>
+                        </div>
+                        <motion.button
+                          onClick={handleRedeemAll}
+                          disabled={isRedeeming}
+                          whileTap={{ scale: 0.95 }}
+                          className="px-4 py-2 rounded-xl font-bold text-white border-2"
+                          style={{
+                            backgroundColor: isRedeeming ? '#9ca3af' : '#059669',
+                            borderColor: '#047857',
+                            boxShadow: isRedeeming ? 'none' : '2px 2px 0 #047857',
+                            cursor: isRedeeming ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {isRedeeming ? (
+                            <span className="flex items-center gap-2">
+                              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                              Redeeming...
+                            </span>
+                          ) : (
+                            'Redeem All'
+                          )}
+                        </motion.button>
+                      </div>
+                      {redeemSuccess && <div className="mt-2 text-sm text-green-700 font-medium">{redeemSuccess}</div>}
+                      {redeemError && <div className="mt-2 text-sm text-red-600 font-medium">{redeemError}</div>}
+                    </div>
+                  )}
 
                   {/* Position cards */}
                   {filteredClosed.map((bet) => (

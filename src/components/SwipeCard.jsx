@@ -7,10 +7,10 @@ import { playSwipeSound, unlockAudio } from '../utils/sounds';
 // Global flag to track if we've set up touch listener
 let touchListenerAdded = false;
 
-function formatTimeUntil(expirationTime) {
-  if (!expirationTime) return null;
+function formatTimeUntil(timestamp) {
+  if (!timestamp) return null;
   const nowSec = Math.floor(Date.now() / 1000);
-  const diffSec = expirationTime - nowSec;
+  const diffSec = timestamp - nowSec;
   if (diffSec <= 0) return 'Expired';
   const mins = Math.floor(diffSec / 60);
   const hours = Math.floor(mins / 60);
@@ -19,6 +19,14 @@ function formatTimeUntil(expirationTime) {
   if (hours < 24) return `${hours}h ${mins % 60}m`;
   if (days < 7) return `${days}d ${hours % 24}h`;
   return `${days}d`;
+}
+
+// Get the relevant time for display - 15-min markets use closeTime, others use expirationTime
+function getMarketTime(market) {
+  if (market.is15MinMarket && market.closeTime) {
+    return market.closeTime;
+  }
+  return market.expirationTime;
 }
 
 export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit }) {
@@ -177,9 +185,9 @@ export default function SwipeCard({ market, onSwipe, isTop, yesProfit, noProfit 
           <div className="px-2 py-0.5 rounded-full border-2 font-bold text-xs" style={{ backgroundColor: categoryColors[market.category] || '#888', borderColor: colors.border }}>
             {market.category}
           </div>
-          {market.expirationTime && (
+          {getMarketTime(market) && (
             <div className="px-2 py-0.5 rounded-full border-2 font-bold text-xs" style={{ backgroundColor: isDark ? 'rgba(42, 42, 42, 0.9)' : 'rgba(255, 255, 255, 0.9)', borderColor: colors.border, color: colors.text }}>
-              ⏱ {formatTimeUntil(market.expirationTime)}
+              ⏱ {formatTimeUntil(getMarketTime(market))}
             </div>
           )}
         </div>

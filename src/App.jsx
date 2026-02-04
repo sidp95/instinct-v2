@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useDynamicContext, useDynamicWaas } from '@dynamic-labs/sdk-react-core';
 import { ChainEnum } from '@dynamic-labs/sdk-api-core';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useOnChainPositions } from './hooks/useOnChainPositions';
-import { ToastProvider } from './context/ToastContext';
+import { ToastProvider, useToast } from './context/ToastContext';
 import { AudioContextProvider } from './context/AudioContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import DynamicProvider from './providers/DynamicProvider';
@@ -13,37 +13,233 @@ import SignInPage from './pages/SignInPage';
 import BettingPage from './pages/BettingPage';
 import HistoryPage from './pages/HistoryPage';
 import WalletPage from './pages/WalletPage';
+import { redeemWinnings, findCloseableAccounts, buildCloseAccountsTransaction, backfillCostBasis } from './services/dflow';
+import { debug, logError } from './utils/debug';
 
-function MainApp({ audioContext, walletAddress }) {
+function MainApp({ audioContext, walletAddress, primaryWallet }) {
   const { colors, isDark } = useTheme();
-  const [activeTab, setActiveTab] = useState('bet'); // Default to betting page
+  const { success: toastSuccess, info: toastInfo } = useToast();
+  const [activeTab, setActiveTab] = useState('bet');
   const [balance, setBalance] = useLocalStorage('instinct-balance', 100);
   const [betSize, setBetSize] = useLocalStorage('instinct-betsize', 1);
-  // Note: localStorage bets are NOT used for history - on-chain positions are the source of truth
-  // localStorage is only for tracking which markets user has seen/skipped
 
-  console.log('[DEBUG-APP] ============================================');
-  console.log('[DEBUG-APP] MainApp rendered');
-  console.log('[DEBUG-APP] walletAddress prop:', walletAddress);
-  console.log('[DEBUG-APP] walletAddress first 8 chars:', walletAddress?.substring(0, 8));
-  console.log('[DEBUG-APP] walletAddress last 4 chars:', walletAddress?.slice(-4));
+  const autoRedeemRan = useRef(false);
+  const autoCleanupRan = useRef(false);
+  const [isAutoRedeeming, setIsAutoRedeeming] = useState(false);
 
-  // Fetch on-chain positions (source of truth for actual holdings)
   const { positions: onChainPositions, isLoading: positionsLoading, refetch: refetchPositions } = useOnChainPositions(walletAddress);
 
-  console.log('[DEBUG-APP] onChainPositions:', onChainPositions.length, 'positionsLoading:', positionsLoading);
+  // Helper function for signing redemption transactions
+  const signAndSubmitRedemption = useCallback(async (transaction, position) => {
+    try {
+      const { Connection, VersionedTransaction } = await import('@solana/web3.js');
+      const { isSolanaWallet } = await import('@dynamic-labs/solana');
+
+      if (!isSolanaWallet(primaryWallet)) return false;
+
+      const txBytes = Buffer.from(transaction, 'base64');
+      const tx = VersionedTransaction.deserialize(txBytes);
+
+      const signer = await primaryWallet.getSigner();
+      const signedTx = await signer.signTransaction(tx);
+
+      const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e', 'confirmed');
+      const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
+
+      debug('[Redeem] Tx submitted:', signature?.slice(0, 8) + '...');
+
+      try {
+        await Promise.race([
+          connection.confirmTransaction(signature, 'confirmed'),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000))
+        ]);
+        return true;
+      } catch {
+        await new Promise(r => setTimeout(r, 2000));
+        const status = await connection.getSignatureStatus(signature);
+        return status?.value?.confirmationStatus === 'confirmed' ||
+               status?.value?.confirmationStatus === 'finalized';
+      }
+    } catch (err) {
+      logError('[Redeem] Sign error:', err.message);
+      return false;
+    }
+  }, [primaryWallet]);
+
+  // Auto-redemption: silently redeem winning tokens when app loads
+  const runAutoRedemption = useCallback(async (positions) => {
+    if (!primaryWallet || !walletAddress) return;
+
+    const redeemable = positions.filter(pos => {
+      const result = pos.market?.resolution;
+      if (!result) return false;
+      const userWon = (pos.choice === 'yes' && result === 'yes') ||
+                      (pos.choice === 'no' && result === 'no');
+      return userWon && pos.tokenCount > 0;
+    });
+
+    if (redeemable.length === 0) return;
+
+    const totalValue = redeemable.reduce((sum, p) => sum + (p.tokenCount || 0), 0);
+    debug('[AutoRedeem] Found', redeemable.length, 'positions worth $' + totalValue.toFixed(2));
+
+    setIsAutoRedeeming(true);
+    toastInfo(`Redeeming $${totalValue.toFixed(2)} in winnings...`, { duration: 5000 });
+
+    let successCount = 0;
+    let redeemedValue = 0;
+
+    for (const position of redeemable) {
+      try {
+        const orderResponse = await redeemWinnings({
+          tokenMint: position.tokenMint,
+          amount: position.tokenCount,
+          userPublicKey: walletAddress,
+        });
+
+        if (!orderResponse.transaction) continue;
+
+        const success = await signAndSubmitRedemption(orderResponse.transaction, position);
+        if (success) {
+          successCount++;
+          redeemedValue += position.tokenCount;
+        }
+
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (err) {
+        logError('[AutoRedeem] Error:', err.message);
+      }
+    }
+
+    setIsAutoRedeeming(false);
+
+    if (successCount > 0) {
+      console.log('[Redeem] Redeemed $' + redeemedValue.toFixed(2) + ' in winnings');
+      toastSuccess(`Redeemed $${redeemedValue.toFixed(2)} in winnings!`, { duration: 5000 });
+      setTimeout(() => refetchPositions(), 3000);
+    }
+  }, [primaryWallet, walletAddress, signAndSubmitRedemption, toastInfo, toastSuccess, refetchPositions]);
+
+  // Trigger auto-redemption once when positions load
+  useEffect(() => {
+    if (
+      !autoRedeemRan.current &&
+      !positionsLoading &&
+      onChainPositions.length > 0 &&
+      primaryWallet &&
+      walletAddress
+    ) {
+      autoRedeemRan.current = true;
+      runAutoRedemption(onChainPositions);
+    }
+  }, [positionsLoading, onChainPositions, primaryWallet, walletAddress, runAutoRedemption]);
+
+  // Sign and submit a close accounts transaction
+  const signAndSubmitCleanup = useCallback(async (transaction) => {
+    try {
+      const { Connection, VersionedTransaction } = await import('@solana/web3.js');
+      const { isSolanaWallet } = await import('@dynamic-labs/solana');
+
+      if (!isSolanaWallet(primaryWallet)) return false;
+
+      const txBytes = Buffer.from(transaction, 'base64');
+      const tx = VersionedTransaction.deserialize(txBytes);
+
+      const signer = await primaryWallet.getSigner();
+      const signedTx = await signer.signTransaction(tx);
+
+      const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e', 'confirmed');
+      const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
+
+      debug('[Cleanup] Tx submitted:', signature?.slice(0, 8) + '...');
+
+      try {
+        await Promise.race([
+          connection.confirmTransaction(signature, 'confirmed'),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000))
+        ]);
+        return true;
+      } catch {
+        await new Promise(r => setTimeout(r, 2000));
+        const status = await connection.getSignatureStatus(signature);
+        return status?.value?.confirmationStatus === 'confirmed' ||
+               status?.value?.confirmationStatus === 'finalized';
+      }
+    } catch (err) {
+      logError('[Cleanup] Sign error:', err.message);
+      return false;
+    }
+  }, [primaryWallet]);
+
+  // Auto-cleanup: silently close worthless token accounts to reclaim rent
+  const runAutoCleanup = useCallback(async () => {
+    if (!primaryWallet || !walletAddress) return;
+
+    try {
+      const closeableAccounts = await findCloseableAccounts(walletAddress);
+      if (closeableAccounts.length === 0) return;
+
+      debug('[AutoCleanup] Found', closeableAccounts.length, 'closeable accounts');
+
+      const transaction = await buildCloseAccountsTransaction(closeableAccounts, walletAddress);
+      const success = await signAndSubmitCleanup(transaction);
+
+      if (success) {
+        debug('[AutoCleanup] Closed', closeableAccounts.length, 'accounts');
+      }
+    } catch (err) {
+      // Silent fail - cleanup is non-critical
+      debug('[AutoCleanup] Error:', err.message);
+    }
+  }, [primaryWallet, walletAddress, signAndSubmitCleanup]);
+
+  // Trigger auto-cleanup after auto-redemption completes
+  useEffect(() => {
+    if (
+      !autoCleanupRan.current &&
+      autoRedeemRan.current &&
+      !isAutoRedeeming &&
+      !positionsLoading &&
+      primaryWallet &&
+      walletAddress
+    ) {
+      autoCleanupRan.current = true;
+      // Delay cleanup slightly to not overwhelm the user with notifications
+      setTimeout(() => runAutoCleanup(), 3000);
+    }
+  }, [isAutoRedeeming, positionsLoading, primaryWallet, walletAddress, runAutoCleanup]);
+
+  // Run cost basis backfill once when wallet is ready
+  const costBackfillRan = useRef(false);
+  useEffect(() => {
+    if (!costBackfillRan.current && walletAddress) {
+      costBackfillRan.current = true;
+      backfillCostBasis(walletAddress).then(result => {
+        if (result.fixed > 0) {
+          console.log('[CostBasis] Backfilled', result.fixed, 'entries');
+        }
+      });
+    }
+  }, [walletAddress]);
 
   const handlePlaceBet = (bet) => {
     if (balance >= bet.amount) {
-      // Note: We don't save to localStorage bets anymore
-      // On-chain positions are fetched directly from blockchain
       setBalance((prev) => prev - bet.amount);
-      // Refetch positions after a short delay to pick up the new on-chain position
       setTimeout(() => refetchPositions(), 3000);
       return true;
     }
     return false;
   };
+
+  const handleRedeemWinnings = useCallback(async (transaction, position) => {
+    return signAndSubmitRedemption(transaction, position);
+  }, [signAndSubmitRedemption]);
 
   const renderPage = () => {
     switch (activeTab) {
@@ -57,7 +253,7 @@ function MainApp({ audioContext, walletAddress }) {
           />
         );
       case 'history':
-        return <HistoryPage bets={onChainPositions} isLoadingPositions={positionsLoading} onRefresh={refetchPositions} />;
+        return <HistoryPage bets={onChainPositions} isLoadingPositions={positionsLoading} onRefresh={refetchPositions} walletAddress={walletAddress} onRedeemWinnings={handleRedeemWinnings} />;
       case 'wallet':
         return (
           <WalletPage
@@ -103,19 +299,6 @@ function AppContent() {
   const isAuthenticated = !!user;
   const hasWallet = !!primaryWallet;
 
-  // Debug logging
-  useEffect(() => {
-    console.log('[App] State:', {
-      sdkHasLoaded,
-      isAuthenticated,
-      hasWallet,
-      primaryWallet: primaryWallet?.address,
-      waasAvailable: !!waas,
-      userHasEmbeddedWallet: waas?.userHasEmbeddedWallet,
-      walletCreationComplete,
-    });
-  }, [sdkHasLoaded, isAuthenticated, hasWallet, primaryWallet, waas, walletCreationComplete]);
-
   // Auto-create embedded wallet if user doesn't have one
   useEffect(() => {
     const createWallet = async () => {
@@ -130,9 +313,8 @@ function AppContent() {
         setIsCreatingWallet(true);
         setWalletCreationAttempted(true);
         try {
-          console.log('[App] Creating embedded Solana wallet...');
+          debug('[App] Creating embedded Solana wallet...');
 
-          // Add timeout to prevent hanging forever
           const timeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Wallet creation timeout')), 30000)
           );
@@ -142,19 +324,12 @@ function AppContent() {
             timeoutPromise
           ]);
 
-          console.log('[App] Embedded wallet created!');
+          debug('[App] Wallet created');
 
-          // Refresh user data to ensure wallet is detected
-          if (refreshUser) {
-            console.log('[App] Refreshing user data...');
-            await refreshUser();
-          }
-
-          // Mark creation as complete - this will allow proceeding even if primaryWallet hasn't updated yet
+          if (refreshUser) await refreshUser();
           setWalletCreationComplete(true);
         } catch (e) {
-          console.error('[App] Failed to create embedded wallet:', e);
-          // Even on failure, mark as complete to prevent infinite loading
+          logError('[App] Wallet creation failed:', e.message);
           setWalletCreationComplete(true);
         } finally {
           setIsCreatingWallet(false);
@@ -164,11 +339,10 @@ function AppContent() {
     createWallet();
   }, [isAuthenticated, hasWallet, waas, isCreatingWallet, walletCreationAttempted, walletCreationComplete, refreshUser]);
 
-  // Safety timeout: if still creating wallet after 15 seconds, proceed anyway
+  // Safety timeout
   useEffect(() => {
     if (isCreatingWallet) {
       const timeout = setTimeout(() => {
-        console.log('[App] Wallet creation taking too long, proceeding anyway...');
         setIsCreatingWallet(false);
         setWalletCreationComplete(true);
       }, 15000);
@@ -184,7 +358,7 @@ function AppContent() {
           await ctx.resume();
           setAudioContext(ctx);
         } catch (e) {
-          console.error('Audio restore error:', e);
+          logError('Audio restore error:', e.message);
         }
         window.removeEventListener('click', initAudio);
         window.removeEventListener('touchstart', initAudio);
@@ -221,7 +395,6 @@ function AppContent() {
     return <SignInPage onAudioInit={handleAudioInit} />;
   }
 
-  // Show loading while creating wallet (but don't block forever)
   if (isCreatingWallet) {
     return (
       <div style={{
@@ -244,12 +417,11 @@ function AppContent() {
 
   return (
     <ToastProvider>
-      <MainApp audioContext={audioContext} walletAddress={primaryWallet?.address} />
+      <MainApp audioContext={audioContext} walletAddress={primaryWallet?.address} primaryWallet={primaryWallet} />
     </ToastProvider>
   );
 }
 
-// Wrapper component to constrain app to mobile-like view on desktop
 function AppContainer({ children }) {
   return (
     <div
@@ -257,7 +429,7 @@ function AppContainer({ children }) {
         minHeight: '100vh',
         display: 'flex',
         justifyContent: 'center',
-        backgroundColor: '#1a1a1a', // Dark background outside the app
+        backgroundColor: '#1a1a1a',
       }}
     >
       <div

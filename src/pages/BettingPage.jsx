@@ -13,13 +13,11 @@ import { useToast } from '../context/ToastContext';
 import { useTheme } from '../context/ThemeContext';
 import { useMarketHistory } from '../hooks/useMarketHistory';
 import { playSwipeSound, unlockAudio } from '../utils/sounds';
+import { debug, logError } from '../utils/debug';
 
 const SOLANA_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
-/**
- * Fetch USDC balance for a wallet
- */
 async function fetchUsdcBalance(walletAddress) {
   try {
     const connection = new Connection(SOLANA_RPC, 'confirmed');
@@ -35,14 +33,11 @@ async function fetchUsdcBalance(walletAddress) {
     }
     return total;
   } catch (error) {
-    console.error('[BettingPage] Error fetching USDC:', error);
+    logError('[Betting] Error fetching USDC:', error.message);
     return 0;
   }
 }
 
-/**
- * Convert raw API error messages to user-friendly messages
- */
 function getFriendlyErrorMessage(error) {
   const message = error?.message || error?.toString() || '';
   const lowerMessage = message.toLowerCase();
@@ -50,19 +45,15 @@ function getFriendlyErrorMessage(error) {
   if (lowerMessage.includes('route_not_found') || lowerMessage.includes('route not found')) {
     return "This market isn't available right now. Try another one!";
   }
-
   if (lowerMessage.includes('no record of a prior credit') || lowerMessage.includes('debit')) {
     return 'Insufficient funds. Please add USDC to your wallet first.';
   }
-
   if (lowerMessage.includes('simulation failed')) {
     return 'Transaction failed. Please try again.';
   }
-
   return 'Something went wrong. Please try again.';
 }
 
-// Theme toggle button component
 function ThemeToggleButton({ isDark, onToggle, colors }) {
   return (
     <button
@@ -86,7 +77,6 @@ function ThemeToggleButton({ isDark, onToggle, colors }) {
       title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
     >
       {isDark ? (
-        // Sun icon for dark mode (click to go light)
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="5" />
           <line x1="12" y1="1" x2="12" y2="3" />
@@ -99,7 +89,6 @@ function ThemeToggleButton({ isDark, onToggle, colors }) {
           <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
         </svg>
       ) : (
-        // Moon icon for light mode (click to go dark)
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
         </svg>
@@ -114,35 +103,29 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
   const { handleLogOut, primaryWallet } = useDynamicContext();
   const { isDark, toggleTheme, colors } = useTheme();
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [allMarkets, setAllMarkets] = useState([]); // Raw markets from API
+  const [allMarkets, setAllMarkets] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [isPlacingBet, setIsPlacingBet] = useState(false);
   const [usdcBalance, setUsdcBalance] = useState(null);
   const { success, warning, error } = useToast();
 
-  // Get wallet from Dynamic
   const walletAddress = primaryWallet?.address || null;
 
-  // Fetch USDC balance when wallet is available
   useEffect(() => {
     if (walletAddress) {
       fetchUsdcBalance(walletAddress).then(setUsdcBalance);
     }
   }, [walletAddress]);
 
-  // Market history - persists interacted markets per wallet
   const { addToHistory, filterMarkets: filterByHistory } = useMarketHistory(walletAddress);
 
-  // Category filter state - default all selected
   const [selectedCategories, setSelectedCategories] = useState(() => new Set(ALL_CATEGORIES));
 
-  // Toggle a category on/off
   const handleCategoryToggle = useCallback((category) => {
     setSelectedCategories(prev => {
       const updated = new Set(prev);
       if (updated.has(category)) {
-        // Don't allow deselecting if it's the only one selected
         if (updated.size > 1) {
           updated.delete(category);
         }
@@ -151,33 +134,23 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
       }
       return updated;
     });
-    // Reset index when filter changes
     setCurrentIndex(0);
   }, []);
 
-  // Filter markets by history and category
   const markets = useMemo(() => {
-    // First filter out interacted markets
     const afterHistory = filterByHistory(allMarkets);
-    // Then filter by selected categories
     const afterCategory = afterHistory.filter(market =>
       selectedCategories.has(market.category)
     );
-    console.log(`[BettingPage] Filtered markets: ${allMarkets.length} -> ${afterHistory.length} (history) -> ${afterCategory.length} (category)`);
+    debug('[Betting] Markets:', allMarkets.length, '->', afterHistory.length, '->', afterCategory.length);
     return afterCategory;
   }, [allMarkets, filterByHistory, selectedCategories]);
 
-  // Get available categories from current markets
   const availableCategories = useMemo(() => {
     const cats = new Set(allMarkets.map(m => m.category));
     return ALL_CATEGORIES.filter(cat => cats.has(cat));
   }, [allMarkets]);
 
-  // Debug logging
-  console.log('[BettingPage] primaryWallet object:', primaryWallet);
-  console.log('[BettingPage] Wallet address for betting:', walletAddress);
-
-  // Fetch markets from API on mount
   useEffect(() => {
     let isMounted = true;
 
@@ -187,13 +160,12 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         setLoadError(null);
         const data = await getMarketsForApp({ limit: 100 });
         if (isMounted) {
-          console.log('[BettingPage] Loaded markets:', data.length);
-          console.log('[BettingPage] First 5 markets IDs:', data.slice(0, 5).map(m => ({ id: m.id, ticker: m.ticker, title: m.title?.substring(0, 30) })));
+          debug('[Betting] Loaded', data.length, 'markets');
           setAllMarkets(data);
           setIsLoading(false);
         }
       } catch (err) {
-        console.error('Failed to load markets:', err);
+        logError('[Betting] Failed to load markets:', err.message);
         if (isMounted) {
           setLoadError(err.message);
           setIsLoading(false);
@@ -202,67 +174,43 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
     }
 
     loadMarkets();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, []);
 
   const currentMarket = markets.length > 0 ? markets[currentIndex % markets.length] : null;
   const nextMarket = markets.length > 1 ? markets[(currentIndex + 1) % markets.length] : null;
 
   const handleSwipe = useCallback(async (dir) => {
-    console.log('[BettingPage] handleSwipe called with direction:', dir);
+    if (!currentMarket || isPlacingBet) return;
 
-    if (!currentMarket) {
-      console.log('[BettingPage] No current market, returning');
-      return;
-    }
-    if (isPlacingBet) {
-      console.log('[BettingPage] Already placing bet, returning');
-      return;
-    }
-
-    // Handle skip - save to history and move to next card
     if (dir === 'skip') {
-      console.log('[BettingPage] SKIP - saving to history and advancing');
       addToHistory(currentMarket.id);
       setCurrentIndex((prev) => prev + 1);
       return;
     }
 
-    // Handle YES/NO bets
     if (dir === 'yes' || dir === 'no') {
-      // Check for $0 USDC balance first
       if (usdcBalance !== null && usdcBalance === 0) {
         warning('You need USDC to place bets. Tap here to fund your wallet!', {
           duration: 5000,
           onClick: goToWallet,
         });
-        // Still advance to next card
-        console.log('[BettingPage] Zero USDC balance - advancing anyway');
         setCurrentIndex((prev) => prev + 1);
         return;
       }
 
-      // Check for insufficient funds (balance less than bet size but not zero)
       const currentBalance = usdcBalance ?? balance;
       if (currentBalance < betSize) {
         error('Insufficient funds. Please add USDC to your wallet first.', {
           duration: 4000,
           onClick: goToWallet,
         });
-        // Still advance to next card
-        console.log('[BettingPage] Insufficient funds - advancing anyway');
         setCurrentIndex((prev) => prev + 1);
         return;
       }
 
-      // Check for wallet
       if (!walletAddress) {
         error('Wallet not connected');
-        console.error('[BettingPage] No wallet address found');
-        // Still advance to next card
         setCurrentIndex((prev) => prev + 1);
         return;
       }
@@ -270,16 +218,12 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
       setIsPlacingBet(true);
 
       try {
-        // Call DFlow Trade API to get order transaction
-        console.log('[BettingPage] Placing bet via DFlow API...');
         const orderResponse = await placeBet({
           market: currentMarket,
           side: dir,
           amount: betSize,
           userPublicKey: walletAddress,
         });
-
-        console.log('[BettingPage] Order response:', orderResponse);
 
         if (!orderResponse.transaction) {
           warning('Order created but no transaction returned', { duration: 3000 });
@@ -288,10 +232,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
           return;
         }
 
-        // Sign and submit the transaction using Dynamic wallet
-        console.log('[BettingPage] Signing transaction...');
-        console.log('[BettingPage] primaryWallet:', primaryWallet);
-
         if (!primaryWallet) {
           error('Wallet not found');
           setIsPlacingBet(false);
@@ -299,34 +239,41 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
           return;
         }
 
-        // Decode the base64 transaction
         const txBytes = Buffer.from(orderResponse.transaction, 'base64');
         const transaction = VersionedTransaction.deserialize(txBytes);
-        console.log('[BettingPage] Transaction deserialized');
 
-        // Sign with Dynamic wallet - check if it's a Solana wallet first
         if (!isSolanaWallet(primaryWallet)) {
           throw new Error('Not a Solana wallet');
         }
 
         const signer = await primaryWallet.getSigner();
         const signedTx = await signer.signTransaction(transaction);
-        console.log('[BettingPage] Transaction signed');
 
-        // Submit using our Helius connection
         const connection = new Connection(SOLANA_RPC, 'confirmed');
         const signature = await connection.sendRawTransaction(signedTx.serialize(), {
           skipPreflight: false,
           preflightCommitment: 'confirmed',
         });
-        console.log('[BettingPage] Transaction submitted:', signature);
 
-        // Wait for confirmation
         await connection.confirmTransaction(signature, 'confirmed');
-        console.log('[BettingPage] Transaction confirmed!');
+
+        // Log critical state change
+        console.log('[Bet] Placed:', dir.toUpperCase(), 'on', currentMarket.id, '| $' + betSize);
+
         success(`Bet placed! ${signature.slice(0, 8)}...`, { duration: 5000 });
 
-        // Track bet locally
+        const tokenMint = dir === 'yes' ? currentMarket.yesMint : currentMarket.noMint;
+        if (tokenMint) {
+          try {
+            const costBasisData = JSON.parse(localStorage.getItem('instinkt_cost_basis') || '{}');
+            const usdcSpent = orderResponse.inAmount ? orderResponse.inAmount / 1000000 : betSize;
+            costBasisData[tokenMint] = (costBasisData[tokenMint] || 0) + usdcSpent;
+            localStorage.setItem('instinkt_cost_basis', JSON.stringify(costBasisData));
+          } catch (e) {
+            // Silent fail for cost basis storage
+          }
+        }
+
         onPlaceBet({
           market: currentMarket,
           choice: dir,
@@ -339,14 +286,12 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
           txSignature: signature,
         });
 
-        // Save to history so this market won't appear again
         addToHistory(currentMarket.id);
-
         setIsPlacingBet(false);
         setCurrentIndex((prev) => prev + 1);
 
       } catch (err) {
-        console.error('[BettingPage] Failed to place bet:', err);
+        logError('[Betting] Failed to place bet:', err.message);
         const friendlyMessage = getFriendlyErrorMessage(err);
         error(friendlyMessage, { duration: 4000 });
         setIsPlacingBet(false);
@@ -356,23 +301,19 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
   }, [currentMarket, betSize, onPlaceBet, balance, error, success, warning, goToWallet, walletAddress, isPlacingBet, primaryWallet, addToHistory, usdcBalance]);
 
   const handleTimerComplete = useCallback(() => {
-    // Show expired toast
     warning('Too slow!', { duration: 3000 });
-    // Save to history (treat timeout as skip)
     if (currentMarket) {
       addToHistory(currentMarket.id);
     }
-    // Skip to next card when timer runs out
     setCurrentIndex((prev) => prev + 1);
   }, [warning, currentMarket, addToHistory]);
 
   const handleButtonClick = (choice) => {
-    unlockAudio(); // Ensure audio is unlocked on button tap (iOS)
+    unlockAudio();
     playSwipeSound();
     handleSwipe(choice);
   };
 
-  // Loading state
   if (isLoading) {
     return (
       <div className="flex flex-col h-full pb-20">
@@ -393,7 +334,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
     );
   }
 
-  // Error state
   if (loadError) {
     return (
       <div className="flex flex-col h-full pb-20">
@@ -422,14 +362,11 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
     );
   }
 
-  // No markets available
   if (!currentMarket) {
     const hasAllMarkets = allMarkets.length > 0;
     const afterHistoryCount = filterByHistory(allMarkets).length;
     const allSeenInCategory = hasAllMarkets && afterHistoryCount === 0;
     const filteredOutByCategory = hasAllMarkets && afterHistoryCount > 0 && markets.length === 0;
-
-    // Check if specific categories have no markets at all (not just filtered)
     const selectedCategoriesArray = Array.from(selectedCategories);
     const noCategoryMarkets = hasAllMarkets && selectedCategoriesArray.length > 0 &&
       !allMarkets.some(m => selectedCategories.has(m.category));
@@ -440,7 +377,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         <LogoutButton />
         <Header />
 
-        {/* Show category filter so user can adjust */}
         {hasAllMarkets && (
           <CategoryFilter
             selectedCategories={selectedCategories}
@@ -481,16 +417,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
     );
   }
 
-  console.log('[BettingPage] Current market for card:', {
-    index: currentIndex,
-    id: currentMarket?.id,
-    ticker: currentMarket?.ticker,
-    title: currentMarket?.title?.substring(0, 30),
-    keyUsed: currentMarket?.id || currentMarket?.ticker || currentIndex
-  });
-
-  // Calculate available height for card
-  // Using fixed positioning to avoid parent padding issues
   const cardMaxHeight = 'calc(100dvh - 330px)';
 
   return (
@@ -501,7 +427,7 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         top: 0,
         left: 0,
         right: 0,
-        bottom: '80px', // Space for bottom navigation
+        bottom: '80px',
         overflowX: 'hidden',
         overflowY: 'hidden',
         touchAction: 'pan-y',
@@ -513,7 +439,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
       <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} colors={colors} />
       <LogoutButton />
 
-      {/* Top section - fixed height with consistent spacing */}
       <div style={{ flexShrink: 0 }}>
         <Header />
         <div style={{ padding: '8px 16px 4px 16px' }}>
@@ -531,7 +456,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         </div>
       </div>
 
-      {/* Card Stack Section - constrained height */}
       <div
         className="px-4"
         style={{
@@ -551,7 +475,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
             position: 'relative',
           }}
         >
-          {/* Background card */}
           {nextMarket && (
             <SwipeCard
               market={nextMarket}
@@ -560,7 +483,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
             />
           )}
 
-          {/* Top card */}
           <AnimatePresence mode="wait">
             <SwipeCard
               key={currentMarket.id || currentMarket.ticker || currentIndex}
@@ -574,7 +496,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
         </div>
       </div>
 
-      {/* Bottom section - ALWAYS visible, anchored to bottom */}
       <div
         className="px-4 pt-2 pb-3"
         style={{
@@ -582,7 +503,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
           backgroundColor: colors.background,
         }}
       >
-        {/* Swipe hints */}
         <div
           className="text-center text-xs font-bold mb-2"
           style={{ color: colors.textMuted }}
@@ -594,7 +514,6 @@ export default function BettingPage({ onPlaceBet, betSize, balance, goToWallet }
           <span className="opacity-50">YES &rarr;</span>
         </div>
 
-        {/* Bet Buttons */}
         <div className="flex gap-3 max-w-md mx-auto">
           <motion.button
             whileTap={{ scale: 0.95 }}

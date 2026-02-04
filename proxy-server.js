@@ -4,15 +4,18 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Debug flag - set to true for verbose logging
+const DEBUG = false;
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const DFLOW_API_KEY = process.env.DFLOW_API_KEY;
 const MARKETS_API_BASE = 'https://c.prediction-markets-api.dflow.net/api/v1';
+const MARKETS_API_DEV = 'https://dev-prediction-markets-api.dflow.net/api/v1';
 const TRADE_API_BASE = 'https://c.quote-api.dflow.net';
 
-// Helper to get headers with API key
 function getHeaders() {
   const headers = { 'Accept': 'application/json' };
   if (DFLOW_API_KEY) {
@@ -21,16 +24,15 @@ function getHeaders() {
   return headers;
 }
 
+function debug(...args) {
+  if (DEBUG) console.log(...args);
+}
+
 app.get('/api/dflow-order', async (req, res) => {
   try {
     const { inputMint, outputMint, amount, slippageBps, userPublicKey } = req.query;
 
-    console.log('[Proxy] Attempting trade:');
-    console.log('  Input (USDC):', inputMint);
-    console.log('  Output (prediction token):', outputMint);
-    console.log('  Amount:', amount);
-    console.log('  User:', userPublicKey);
-    console.log('  API Key:', DFLOW_API_KEY ? 'SET' : 'NOT SET');
+    debug('[Proxy] Trade:', inputMint?.slice(0, 8), '->', outputMint?.slice(0, 8), 'amount:', amount);
 
     const queryParams = new URLSearchParams({
       inputMint,
@@ -41,13 +43,10 @@ app.get('/api/dflow-order', async (req, res) => {
     });
 
     const orderUrl = `${TRADE_API_BASE}/order?${queryParams.toString()}`;
-    console.log('[Proxy] GET order:', orderUrl);
-
     const response = await fetch(orderUrl, { headers: getHeaders() });
     const text = await response.text();
 
-    console.log('[Proxy] Status:', response.status);
-    console.log('[Proxy] Response:', text.substring(0, 300));
+    debug('[Proxy] Order status:', response.status);
 
     if (response.status === 403) {
       return res.status(403).json({
@@ -63,7 +62,7 @@ app.get('/api/dflow-order', async (req, res) => {
       return res.status(response.status).send(text);
     }
   } catch (error) {
-    console.error('[Proxy] Error:', error);
+    console.error('[Proxy] Order error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -73,14 +72,10 @@ app.get('/api/markets', async (req, res) => {
     const queryString = new URLSearchParams(req.query).toString();
     const url = `${MARKETS_API_BASE}/events?${queryString}`;
 
-    console.log('[Proxy Markets] Fetching:', url);
-    console.log('[Proxy Markets] API Key:', DFLOW_API_KEY ? 'SET' : 'NOT SET');
+    debug('[Proxy] Markets:', url.slice(0, 100) + '...');
 
     const response = await fetch(url, { headers: getHeaders() });
     const text = await response.text();
-
-    console.log('[Proxy Markets] Status:', response.status);
-    console.log('[Proxy Markets] Response length:', text.length);
 
     if (!text) {
       return res.status(500).json({ error: 'Empty response from DFlow API' });
@@ -88,14 +83,13 @@ app.get('/api/markets', async (req, res) => {
 
     try {
       const data = JSON.parse(text);
-      console.log('[Proxy Markets] Got', data.events?.length || 0, 'events');
+      debug('[Proxy] Markets returned:', data.events?.length || 0, 'events');
       res.status(response.status).json(data);
     } catch (e) {
-      console.log('[Proxy Markets] Parse error, raw response:', text.substring(0, 200));
       res.status(500).json({ error: 'Invalid JSON from DFlow API' });
     }
   } catch (error) {
-    console.error('[Proxy Markets] Error:', error);
+    console.error('[Proxy] Markets error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -103,27 +97,11 @@ app.get('/api/markets', async (req, res) => {
 app.get('/api/test-market', async (req, res) => {
   const { outputMint } = req.query;
 
-  console.log('[Test] Checking market for mint:', outputMint);
-
   const marketsUrl = `${MARKETS_API_BASE}/markets?status=active&limit=50`;
-  console.log('[Test] Fetching markets...');
-
   const response = await fetch(marketsUrl, { headers: getHeaders() });
   const data = await response.json();
 
   const markets = data.markets || [];
-  console.log('[Test] Total markets:', markets.length);
-
-  markets.slice(0, 5).forEach(m => {
-    console.log('[Test] Market:', m.ticker);
-    if (m.accounts) {
-      Object.entries(m.accounts).forEach(([key, value]) => {
-        console.log('  Settlement:', key);
-        console.log('  yesMint:', value.yesMint);
-        console.log('  noMint:', value.noMint);
-      });
-    }
-  });
 
   let foundMarket = null;
   for (const market of markets) {
@@ -139,10 +117,8 @@ app.get('/api/test-market', async (req, res) => {
   }
 
   if (foundMarket) {
-    console.log('[Test] Found market for mint:', foundMarket);
     res.json({ found: true, ...foundMarket });
   } else {
-    console.log('[Test] Mint not found in any active market');
     res.json({ found: false, searchedMint: outputMint, totalMarkets: markets.length });
   }
 });
@@ -174,13 +150,7 @@ app.get('/api/get-working-market', async (req, res) => {
       }
     }
 
-    console.log('[Working Market] Found', marketsWithPricing.length, 'markets with pricing');
-
     if (marketsWithPricing.length > 0) {
-      marketsWithPricing.slice(0, 5).forEach(m => {
-        console.log('  -', m.marketTicker, '| YES:', m.yesAsk, '| NO:', m.noAsk);
-      });
-
       return res.json({
         found: marketsWithPricing.length,
         markets: marketsWithPricing.slice(0, 10)
@@ -197,7 +167,6 @@ app.get('/api/get-working-market', async (req, res) => {
   }
 });
 
-// Filter prediction market outcome mints from a list of addresses
 app.post('/api/filter-mints', async (req, res) => {
   try {
     const { addresses } = req.body;
@@ -206,27 +175,48 @@ app.post('/api/filter-mints', async (req, res) => {
       return res.status(400).json({ error: 'addresses array required' });
     }
 
-    console.log('[Proxy] Filtering', addresses.length, 'mints for prediction markets');
+    debug('[Proxy] Filtering', addresses.length, 'mints');
 
     const response = await fetch(`${MARKETS_API_BASE}/filter_outcome_mints`, {
       method: 'POST',
-      headers: {
-        ...getHeaders(),
-        'Content-Type': 'application/json'
-      },
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ addresses })
     });
 
-    const data = await response.json();
-    console.log('[Proxy] Found', data.outcomeMints?.length || 0, 'prediction market mints');
-    res.status(response.status).json(data);
+    let data = await response.json();
+    const mainMints = new Set(data.outcomeMints || []);
+
+    const unrecognizedMints = addresses.filter(a => !mainMints.has(a));
+
+    if (response.status === 404 || unrecognizedMints.length > 0) {
+      try {
+        const devResponse = await fetch(`${MARKETS_API_DEV}/filter_outcome_mints`, {
+          method: 'POST',
+          headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: response.status === 404 ? addresses : unrecognizedMints })
+        });
+
+        if (devResponse.ok) {
+          const devData = await devResponse.json();
+          const devMints = devData.outcomeMints || [];
+          if (devMints.length > 0) {
+            const allMints = [...mainMints, ...devMints];
+            data = { outcomeMints: [...new Set(allMints)] };
+          }
+        }
+      } catch (devErr) {
+        debug('[Proxy] Dev API error:', devErr.message);
+      }
+    }
+
+    debug('[Proxy] Filter result:', data.outcomeMints?.length || 0, 'mints');
+    res.status(200).json(data);
   } catch (error) {
-    console.error('[Proxy] filter-mints error:', error);
+    console.error('[Proxy] filter-mints error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get market details from mint addresses
 app.post('/api/markets-batch', async (req, res) => {
   try {
     const { mints } = req.body;
@@ -235,22 +225,56 @@ app.post('/api/markets-batch', async (req, res) => {
       return res.status(400).json({ error: 'mints array required' });
     }
 
-    console.log('[Proxy] Fetching market details for', mints.length, 'mints');
+    debug('[Proxy] Batch fetch for', mints.length, 'mints');
 
     const response = await fetch(`${MARKETS_API_BASE}/markets/batch`, {
       method: 'POST',
-      headers: {
-        ...getHeaders(),
-        'Content-Type': 'application/json'
-      },
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ mints })
     });
 
-    const data = await response.json();
-    console.log('[Proxy] Got', data.markets?.length || 0, 'markets');
-    res.status(response.status).json(data);
+    let data = await response.json();
+
+    const foundMints = new Set();
+    if (data.markets) {
+      for (const market of data.markets) {
+        const usdcAccount = market.accounts?.['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'];
+        if (usdcAccount?.yesMint) foundMints.add(usdcAccount.yesMint);
+        if (usdcAccount?.noMint) foundMints.add(usdcAccount.noMint);
+      }
+    }
+
+    const missingMints = mints.filter(m => !foundMints.has(m));
+
+    if (response.status === 404 || missingMints.length > 0) {
+      const mintsToFetch = response.status === 404 ? mints : missingMints;
+
+      try {
+        const devResponse = await fetch(`${MARKETS_API_DEV}/markets/batch`, {
+          method: 'POST',
+          headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mints: mintsToFetch })
+        });
+
+        if (devResponse.ok) {
+          const devData = await devResponse.json();
+          if (devData.markets && devData.markets.length > 0) {
+            if (response.status === 404 || !data.markets) {
+              data = devData;
+            } else {
+              data.markets = [...data.markets, ...devData.markets];
+            }
+          }
+        }
+      } catch (devErr) {
+        debug('[Proxy] Dev API error:', devErr.message);
+      }
+    }
+
+    debug('[Proxy] Batch result:', data.markets?.length || 0, 'markets');
+    res.status(200).json(data);
   } catch (error) {
-    console.error('[Proxy] markets-batch error:', error);
+    console.error('[Proxy] markets-batch error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -267,13 +291,8 @@ app.get('/api/test-trade', async (req, res) => {
 
   const orderUrl = `${TRADE_API_BASE}/order?inputMint=${USDC_MINT}&outputMint=${yesMint}&amount=${amount}&slippageBps=100&userPublicKey=${userPublicKey}`;
 
-  console.log('[Test Trade] URL:', orderUrl);
-
   const response = await fetch(orderUrl, { headers: getHeaders() });
   const text = await response.text();
-
-  console.log('[Test Trade] Status:', response.status);
-  console.log('[Test Trade] Response:', text.substring(0, 500));
 
   res.status(response.status).send(text);
 });
@@ -283,7 +302,6 @@ const server = app.listen(3001, () => {
   console.log('DFLOW_API_KEY:', DFLOW_API_KEY ? 'SET' : 'NOT SET');
 });
 
-// Keep the server alive
 server.on('error', (err) => {
   console.error('Server error:', err);
 });
