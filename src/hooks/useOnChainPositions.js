@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchUserPositionsOnChain } from '../services/dflow';
+import { fetchUserPositionsOnChain, fetchPositionHistory } from '../services/dflow';
 import { debug, logError } from '../utils/debug';
 
 const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=fc70f382-f7ec-48d3-a615-9bacd782570e';
@@ -49,12 +49,14 @@ export function useOnChainPositions(walletAddress) {
   const [error, setError] = useState(null);
 
   const fetchPositions = useCallback(async () => {
+    console.log('[Positions] Starting fetch for wallet:', walletAddress);
+
     if (!walletAddress) {
       setPositions([]);
       return;
     }
 
-    debug('[Positions] Fetching for wallet:', walletAddress?.slice(0, 8) + '...');
+    console.log('[Positions] Fetching for wallet:', walletAddress?.slice(0, 8) + '...');
 
     setIsLoading(true);
     setError(null);
@@ -63,22 +65,54 @@ export function useOnChainPositions(walletAddress) {
       const usdcBalance = await fetchUsdcBalance(walletAddress);
       debug('[Positions] USDC balance: $' + (usdcBalance !== null ? usdcBalance.toFixed(2) : 'N/A'));
 
+      // Fetch on-chain positions (tokens user currently holds)
       const onChainPositions = await fetchUserPositionsOnChain(walletAddress);
-      debug('[Positions] Found', onChainPositions.length, 'positions on-chain');
+      console.log('[Positions] On-chain positions:', onChainPositions.length);
 
-      // Deduplicate by tokenMint
-      const seen = new Set();
-      const uniquePositions = onChainPositions.filter(pos => {
-        const key = pos.tokenMint || `${pos.market?.id}-${pos.choice}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      // Fetch historical positions from Helius (includes closed/redeemed positions)
+      let historyPositions = [];
+      let costBasisMap = {};
+      try {
+        const historyResult = await fetchPositionHistory(walletAddress);
+        historyPositions = historyResult.positions || [];
+        costBasisMap = historyResult.costBasisMap || {};
+        console.log('[Positions] History positions:', historyPositions.length);
+      } catch (err) {
+        console.warn('[Positions] History fetch failed (non-blocking):', err.message);
+      }
 
-      // Transform to match the bet format used in HistoryPage
+      // Transform on-chain positions
       const nowSeconds = Math.floor(Date.now() / 1000);
+      const allPositions = new Map();
 
-      const transformedPositions = uniquePositions.map(pos => {
+      // Build a Set of token mints that exist on-chain with balance > 0
+      const onChainMints = new Set();
+      for (const pos of onChainPositions) {
+        if (pos.amount > 0) {
+          onChainMints.add(pos.tokenMint);
+        }
+      }
+      console.log('[Positions] On-chain token mints:', onChainMints.size);
+
+      // First add all history positions (these include closed bets)
+      // Mark won positions as redeemed if tokens no longer exist on-chain
+      for (const histPos of historyPositions) {
+        const isWonPosition = histPos.status === 'won';
+        const existsOnChain = onChainMints.has(histPos.tokenMint);
+
+        // If it's a won position and tokens don't exist on-chain, mark as redeemed
+        const isRedeemed = isWonPosition && !existsOnChain;
+
+        allPositions.set(histPos.tokenMint, {
+          ...histPos,
+          isRedeemed,
+          // Preserve tokensReceived for P&L calculation even if redeemed
+          tokensReceived: histPos.tokensReceived || histPos.tokenCount,
+        });
+      }
+
+      // Then overlay/update with on-chain positions (current state)
+      for (const pos of onChainPositions) {
         const tokenCount = pos.amount;
         const market = pos.market;
         const result = market.resolution;
@@ -103,22 +137,32 @@ export function useOnChainPositions(walletAddress) {
           positionStatus = 'pending_resolution';
         }
 
-        return {
+        // Get cost basis and tokensReceived from history if available
+        const existingHist = allPositions.get(pos.tokenMint);
+
+        allPositions.set(pos.tokenMint, {
           market: market,
           choice: pos.choice,
           tokenCount: tokenCount,
+          costBasis: existingHist?.costBasis || costBasisMap[pos.tokenMint] || null,
+          // Preserve original tokensReceived from history for P&L calculation
+          tokensReceived: existingHist?.tokensReceived || tokenCount,
           payout: payout,
-          timestamp: Date.now(),
+          timestamp: existingHist?.timestamp || Date.now(),
           status: positionStatus,
           tokenMint: pos.tokenMint,
           tokenAccount: pos.tokenAccount,
           isOnChain: true,
-        };
-      });
+          isRedeemed: false, // Still has tokens on-chain, not redeemed
+        });
+      }
 
+      const transformedPositions = Array.from(allPositions.values());
       setPositions(transformedPositions);
-      const totalTokens = transformedPositions.reduce((sum, p) => sum + (p.tokenCount || 0), 0);
-      debug('[Positions] Loaded:', transformedPositions.length, 'positions, $' + totalTokens.toFixed(2), 'total value');
+
+      const openCount = transformedPositions.filter(p => p.status === 'pending' || p.status === 'pending_resolution').length;
+      const closedCount = transformedPositions.filter(p => p.status === 'won' || p.status === 'lost').length;
+      console.log('[Positions] Final:', transformedPositions.length, 'total (', openCount, 'open,', closedCount, 'closed)');
     } catch (err) {
       logError('[Positions] Error:', err.message);
       setError(err.message);

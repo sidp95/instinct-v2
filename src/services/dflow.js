@@ -518,6 +518,203 @@ export async function fetchUserPositionsOnChain(userPublicKey) {
 }
 
 /**
+ * Fetch ALL historical positions from Helius transaction history.
+ * Parses PLACE_BET transactions to reconstruct closed positions.
+ * Returns positions with cost basis computed from actual USDC spent.
+ */
+export async function fetchPositionHistory(walletAddress) {
+  if (!walletAddress) return { positions: [], costBasisMap: {} };
+
+  const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  const proxyBase = isDev ? 'http://localhost:3001' : '';
+
+  try {
+    console.log('[History] Fetching transaction history for:', walletAddress?.slice(0, 8) + '...');
+
+    // Fetch transaction history through proxy server (Helius API max limit is 100)
+    const response = await fetch(`${proxyBase}/api/helius-transactions?address=${walletAddress}&limit=100`);
+
+    if (!response.ok) {
+      console.error('[History] Helius fetch failed:', response.status);
+      return { positions: [], costBasisMap: {} };
+    }
+
+    const transactions = await response.json();
+
+    if (!Array.isArray(transactions)) {
+      console.error('[History] Invalid transactions response');
+      return { positions: [], costBasisMap: {} };
+    }
+
+    console.log('[History] Found', transactions.length, 'transactions');
+
+    // Build a map of tokenMint -> { costBasis, tokensReceived, timestamp }
+    const positionMap = new Map();
+
+    for (const tx of transactions) {
+      // Only process PLACE_BET transactions
+      if (tx.type !== 'PLACE_BET') continue;
+
+      const timestamp = tx.timestamp ? tx.timestamp * 1000 : Date.now();
+      const accountData = tx.accountData || [];
+
+      // Find token received by wallet and USDC spent
+      let tokenReceived = null;
+      let usdcSpent = 0;
+
+      for (const acc of accountData) {
+        for (const change of (acc.tokenBalanceChanges || [])) {
+          const mint = change.mint;
+          const rawAmount = change.rawTokenAmount || {};
+          const amount = parseInt(rawAmount.tokenAmount || '0', 10);
+          const decimals = rawAmount.decimals || 6;
+          const uiAmount = amount / Math.pow(10, decimals);
+          const userAccount = change.userAccount;
+
+          // Token received by wallet (positive amount, non-USDC)
+          if (userAccount === walletAddress && mint !== USDC_MINT && uiAmount > 0) {
+            tokenReceived = { mint, amount: uiAmount };
+          }
+
+          // USDC spent (negative amount from any account)
+          if (mint === USDC_MINT && uiAmount < 0) {
+            usdcSpent = Math.abs(uiAmount);
+          }
+        }
+      }
+
+      if (tokenReceived && usdcSpent > 0) {
+        const existing = positionMap.get(tokenReceived.mint);
+        if (existing) {
+          // Accumulate for multiple bets on same position
+          existing.costBasis += usdcSpent;
+          existing.tokensReceived += tokenReceived.amount;
+        } else {
+          positionMap.set(tokenReceived.mint, {
+            tokenMint: tokenReceived.mint,
+            costBasis: usdcSpent,
+            tokensReceived: tokenReceived.amount,
+            timestamp,
+            signature: tx.signature,
+          });
+        }
+      }
+    }
+
+    console.log('[History] Found', positionMap.size, 'bets from PLACE_BET transactions');
+
+    if (positionMap.size === 0) {
+      return { positions: [], costBasisMap: {} };
+    }
+
+    // Get market details for all these token mints
+    const allMints = Array.from(positionMap.keys());
+    console.log('[History] Token mints to look up:', allMints.length);
+
+    // First filter for prediction market tokens
+    const filterResponse = await fetch(`${proxyBase}/api/filter-mints`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ addresses: allMints })
+    });
+
+    if (!filterResponse.ok) {
+      console.error('[History] filter-mints failed:', filterResponse.status);
+      return { positions: [], costBasisMap: {} };
+    }
+
+    const filterData = await filterResponse.json();
+    const outcomeMints = new Set(filterData.outcomeMints || []);
+    console.log('[History] Confirmed prediction market tokens:', outcomeMints.size);
+
+    if (outcomeMints.size === 0) {
+      console.warn('[History] No prediction market tokens found in filter response');
+      return { positions: [], costBasisMap: {} };
+    }
+
+    // Get market details
+    const marketsResponse = await fetch(`${proxyBase}/api/markets-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mints: Array.from(outcomeMints) })
+    });
+
+    if (!marketsResponse.ok) {
+      console.error('[History] markets-batch failed:', marketsResponse.status);
+      return { positions: [], costBasisMap: {} };
+    }
+
+    const marketsData = await marketsResponse.json();
+    const markets = marketsData.markets || [];
+    console.log('[History] Got market details for', markets.length, 'markets');
+
+    // Build mint -> market + side mapping
+    const mintToMarket = new Map();
+    for (const market of markets) {
+      const usdcAccount = market.accounts?.[USDC_MINT];
+      if (!usdcAccount) continue;
+
+      if (usdcAccount.yesMint) {
+        mintToMarket.set(usdcAccount.yesMint, { market, side: 'yes' });
+      }
+      if (usdcAccount.noMint) {
+        mintToMarket.set(usdcAccount.noMint, { market, side: 'no' });
+      }
+    }
+
+    // Build final positions list and cost basis map
+    const positions = [];
+    const costBasisMap = {};
+
+    for (const [tokenMint, posData] of positionMap) {
+      if (!outcomeMints.has(tokenMint)) continue;
+
+      const marketInfo = mintToMarket.get(tokenMint);
+      if (!marketInfo) {
+        console.warn('[History] No market info for mint:', tokenMint.slice(0, 12) + '...');
+        continue;
+      }
+
+      const { market, side } = marketInfo;
+      const transformedMarket = transformMarket(market);
+      const result = market.result || market.resolution;
+
+      // Determine position status
+      let status = 'pending';
+      if (result === 'yes' || result === 'no') {
+        const userWon = (side === 'yes' && result === 'yes') ||
+                        (side === 'no' && result === 'no');
+        status = userWon ? 'won' : 'lost';
+      } else if (market.status === 'finalized' || market.status === 'resolved') {
+        status = 'pending_resolution';
+      }
+
+      positions.push({
+        market: transformedMarket,
+        choice: side,
+        tokenMint,
+        costBasis: posData.costBasis,
+        tokensReceived: posData.tokensReceived,
+        tokenCount: posData.tokensReceived, // For compatibility with HistoryPage
+        timestamp: posData.timestamp,
+        status,
+        isFromHistory: true,
+      });
+
+      // Store cost basis for this token mint
+      costBasisMap[tokenMint] = posData.costBasis;
+    }
+
+    console.log('[History] Built', positions.length, 'positions from history');
+    console.log('[History] Position statuses:', positions.map(p => `${p.market.title?.slice(0, 20)}... = ${p.status}`));
+    return { positions, costBasisMap };
+  } catch (error) {
+    console.error('[History] Error fetching position history:', error.message);
+    return { positions: [], costBasisMap: {} };
+  }
+}
+
+/**
  * Place a bet via DFlow Trade API
  */
 export async function placeBet({ market, side, amount, userPublicKey }) {
@@ -755,6 +952,7 @@ export async function findCloseableAccounts(userPublicKey) {
           mint: accountInfo.mint,
           programId: accountInfo.programId,
           amount: accountInfo.amount,
+          rawAmount: accountInfo.rawAmount,
           market: {
             ticker: market.ticker,
             title: market.title,
@@ -848,14 +1046,23 @@ export async function buildCloseAccountsTransaction(accounts, ownerPublicKey) {
  * This function fetches transaction history to find the real USDC amounts.
  */
 export async function backfillCostBasis(walletAddress) {
-  const HELIUS_API_KEY = 'fc70f382-f7ec-48d3-a615-9bacd782570e';
   const STORAGE_KEY = 'instinkt_cost_basis';
   const BACKFILL_FLAG = 'instinkt_cost_basis_backfilled';
+  const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  const proxyBase = isDev ? 'http://localhost:3001' : '';
 
-  // Check if already backfilled
-  if (localStorage.getItem(BACKFILL_FLAG) === 'true') {
-    debug('[Backfill] Already completed');
+  // Check if already backfilled - but re-run if no cost basis data exists
+  const existingCostBasis = localStorage.getItem(STORAGE_KEY);
+  const hasData = existingCostBasis && Object.keys(JSON.parse(existingCostBasis)).length > 0;
+
+  if (localStorage.getItem(BACKFILL_FLAG) === 'true' && hasData) {
+    debug('[Backfill] Already completed with data');
     return { fixed: 0, skipped: true };
+  }
+
+  // Clear flag if it was set but no data exists (indicates failed backfill)
+  if (localStorage.getItem(BACKFILL_FLAG) === 'true' && !hasData) {
+    debug('[Backfill] Re-running - flag set but no data found');
   }
 
   if (!walletAddress) {
@@ -863,9 +1070,13 @@ export async function backfillCostBasis(walletAddress) {
   }
 
   try {
-    // Fetch transaction history from Helius
-    const url = `https://api.helius.xyz/v0/addresses/${walletAddress}/transactions?api-key=${HELIUS_API_KEY}&limit=100`;
-    const response = await fetch(url);
+    // Fetch transaction history through proxy server
+    const response = await fetch(`${proxyBase}/api/helius-transactions?address=${walletAddress}&limit=100`);
+
+    if (!response.ok) {
+      return { fixed: 0, error: `Helius fetch failed: ${response.status}` };
+    }
+
     const transactions = await response.json();
 
     if (!Array.isArray(transactions)) {
@@ -906,9 +1117,23 @@ export async function backfillCostBasis(walletAddress) {
     const costBasisData = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
 
     let fixedCount = 0;
+    let addedCount = 0;
     const fixes = [];
+    const additions = [];
 
-    // Check each entry and fix if needed
+    // First, add missing entries from transaction history
+    for (const [tokenMint, actualCost] of Object.entries(actualCosts)) {
+      if (!(tokenMint in costBasisData)) {
+        costBasisData[tokenMint] = actualCost;
+        addedCount++;
+        additions.push({
+          tokenMint: tokenMint.slice(0, 8) + '...',
+          cost: actualCost.toFixed(4)
+        });
+      }
+    }
+
+    // Then fix existing entries if needed
     for (const [tokenMint, storedCost] of Object.entries(costBasisData)) {
       const actualCost = actualCosts[tokenMint];
 
@@ -932,18 +1157,24 @@ export async function backfillCostBasis(walletAddress) {
       }
     }
 
-    if (fixedCount > 0) {
+    if (addedCount > 0 || fixedCount > 0) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(costBasisData));
-      console.log('[Backfill] Fixed', fixedCount, 'cost basis entries:');
-      fixes.forEach(f => console.log('  ', f.tokenMint, ':', f.oldCost, '->', f.newCost));
+      if (addedCount > 0) {
+        console.log('[Backfill] Added', addedCount, 'missing cost basis entries:');
+        additions.forEach(a => console.log('  ', a.tokenMint, ':', a.cost));
+      }
+      if (fixedCount > 0) {
+        console.log('[Backfill] Fixed', fixedCount, 'cost basis entries:');
+        fixes.forEach(f => console.log('  ', f.tokenMint, ':', f.oldCost, '->', f.newCost));
+      }
     }
 
     // Mark as backfilled
     localStorage.setItem(BACKFILL_FLAG, 'true');
 
-    return { fixed: fixedCount, fixes };
+    return { fixed: fixedCount, added: addedCount, fixes, additions };
   } catch (err) {
     logError('[Backfill] Error:', err.message);
-    return { fixed: 0, error: err.message };
+    return { fixed: 0, added: 0, error: err.message };
   }
 }

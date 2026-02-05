@@ -6,15 +6,19 @@ import LogoutButton from '../components/LogoutButton';
 import { redeemWinnings } from '../services/dflow';
 import { debug, logError } from '../utils/debug';
 
-const HELIUS_API_KEY = 'fc70f382-f7ec-48d3-a615-9bacd782570e';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 async function fetchTotalSpent(walletAddress) {
   if (!walletAddress) return 0;
 
+  const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  const proxyBase = isDev ? 'http://localhost:3001' : '';
+
   try {
-    const url = `https://api.helius.xyz/v0/addresses/${walletAddress}/transactions?api-key=${HELIUS_API_KEY}&limit=100`;
-    const response = await fetch(url);
+    const response = await fetch(`${proxyBase}/api/helius-transactions?address=${walletAddress}&limit=100`);
+
+    if (!response.ok) return 0;
+
     const transactions = await response.json();
 
     if (!Array.isArray(transactions)) return 0;
@@ -38,7 +42,14 @@ async function fetchTotalSpent(walletAddress) {
   }
 }
 
-function getCostBasis(tokenMint) {
+// Cost basis is now provided directly from position data (fetched from tx history)
+// This function is kept for backward compatibility but prefers position.costBasis
+function getCostBasis(tokenMint, position = null) {
+  // First check if position has costBasis from transaction history
+  if (position?.costBasis !== undefined && position?.costBasis !== null) {
+    return position.costBasis;
+  }
+  // Fallback to localStorage for backward compatibility
   if (!tokenMint) return null;
   try {
     const costBasisData = JSON.parse(localStorage.getItem('instinkt_cost_basis') || '{}');
@@ -152,13 +163,16 @@ function OpenPositionCard({ bet, colors }) {
 
 function ClosedPositionCard({ bet, colors }) {
   const won = bet.status === 'won';
-  const tokenCount = bet.tokenCount || 0;
-  const costBasis = getCostBasis(bet.tokenMint);
+  // For won positions, use tokensReceived (original tokens received) for P&L calculation
+  // This works even for redeemed positions where tokenCount may be 0
+  const tokensWon = bet.tokensReceived || bet.tokenCount || 0;
+  const costBasis = getCostBasis(bet.tokenMint, bet);
 
   let pnlDisplay = null;
   if (won) {
     if (costBasis !== null) {
-      const profit = tokenCount - costBasis;
+      // Profit = tokens received * $1 - cost basis
+      const profit = tokensWon - costBasis;
       pnlDisplay = <span className="font-bold text-xl text-green-600">Won +${profit.toFixed(2)}</span>;
     } else {
       pnlDisplay = <span className="font-bold text-xl text-green-600">Won</span>;
@@ -366,9 +380,14 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh, walle
   }, [allBets]);
 
   const unredeemedWinnings = useMemo(() => {
-    const wonPositions = closedPositions.filter(bet => bet.status === 'won' && bet.tokenCount > 0);
+    // Only include won positions that still have tokens on-chain (not yet redeemed)
+    const wonPositions = closedPositions.filter(bet =>
+      bet.status === 'won' &&
+      bet.tokenCount > 0 &&
+      !bet.isRedeemed  // Exclude already redeemed positions
+    );
     const totalValue = wonPositions.reduce((sum, bet) => sum + (bet.tokenCount || 0), 0);
-    debug('[History] Unredeemed winnings: $' + totalValue.toFixed(2));
+    debug('[History] Unredeemed winnings: $' + totalValue.toFixed(2), '(', wonPositions.length, 'positions)');
     return { positions: wonPositions, totalValue };
   }, [closedPositions]);
 
@@ -673,11 +692,13 @@ export default function HistoryPage({ bets, isLoadingPositions, onRefresh, walle
                           let hasAnyCost = false;
 
                           filteredClosed.forEach(b => {
-                            const cost = getCostBasis(b.tokenMint);
+                            const cost = getCostBasis(b.tokenMint, b);
                             if (cost !== null) {
                               hasAnyCost = true;
                               if (b.status === 'won') {
-                                netPnL += (b.tokenCount || 0) - cost;
+                                // Use tokensReceived for P&L calculation (works for redeemed positions)
+                                const tokensWon = b.tokensReceived || b.tokenCount || 0;
+                                netPnL += tokensWon - cost;
                               } else {
                                 netPnL -= cost;
                               }

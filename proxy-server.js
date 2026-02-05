@@ -12,9 +12,11 @@ app.use(cors());
 app.use(express.json());
 
 const DFLOW_API_KEY = process.env.DFLOW_API_KEY;
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY || 'fc70f382-f7ec-48d3-a615-9bacd782570e';
 const MARKETS_API_BASE = 'https://c.prediction-markets-api.dflow.net/api/v1';
 const MARKETS_API_DEV = 'https://dev-prediction-markets-api.dflow.net/api/v1';
 const TRADE_API_BASE = 'https://c.quote-api.dflow.net';
+const HELIUS_API_BASE = 'https://api.helius.xyz/v0';
 
 function getHeaders() {
   const headers = { 'Accept': 'application/json' };
@@ -275,6 +277,46 @@ app.post('/api/markets-batch', async (req, res) => {
     res.status(200).json(data);
   } catch (error) {
     console.error('[Proxy] markets-batch error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Helius transaction history endpoint
+app.get('/api/helius-transactions', async (req, res) => {
+  try {
+    const { address } = req.query;
+    // Helius API max limit is 100
+    const limit = Math.min(parseInt(req.query.limit) || 100, 100);
+
+    if (!address) {
+      return res.status(400).json({ error: 'address parameter required' });
+    }
+
+    const url = `${HELIUS_API_BASE}/addresses/${address}/transactions?api-key=${HELIUS_API_KEY}&limit=${limit}`;
+
+    // Debug logging
+    console.log('[Proxy] Helius request:');
+    console.log('  Address:', address);
+    console.log('  HELIUS_API_KEY:', HELIUS_API_KEY ? HELIUS_API_KEY.slice(0, 8) + '...' : 'NOT SET');
+    console.log('  Full URL:', url.replace(HELIUS_API_KEY, 'API_KEY_HIDDEN'));
+
+    const response = await fetch(url);
+    const responseText = await response.text();
+
+    console.log('[Proxy] Helius response:');
+    console.log('  Status:', response.status);
+    console.log('  Body preview:', responseText.slice(0, 300));
+
+    if (!response.ok) {
+      console.error('[Proxy] Helius error:', response.status, responseText);
+      return res.status(response.status).json({ error: `Helius API error: ${response.status}`, details: responseText });
+    }
+
+    const data = JSON.parse(responseText);
+    console.log('[Proxy] Helius returned:', Array.isArray(data) ? data.length : 0, 'transactions');
+    res.json(data);
+  } catch (error) {
+    console.error('[Proxy] helius-transactions error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

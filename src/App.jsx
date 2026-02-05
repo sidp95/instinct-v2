@@ -74,6 +74,11 @@ function MainApp({ audioContext, walletAddress, primaryWallet }) {
     if (!primaryWallet || !walletAddress) return;
 
     const redeemable = positions.filter(pos => {
+      // Skip positions that have already been redeemed (tokens no longer on-chain)
+      if (pos.isRedeemed) return false;
+      // Only redeem positions that actually exist on-chain
+      if (!pos.isOnChain) return false;
+
       const result = pos.market?.resolution;
       if (!result) return false;
       const userWon = (pos.choice === 'yes' && result === 'yes') ||
@@ -221,8 +226,11 @@ function MainApp({ audioContext, walletAddress, primaryWallet }) {
     if (!costBackfillRan.current && walletAddress) {
       costBackfillRan.current = true;
       backfillCostBasis(walletAddress).then(result => {
+        if (result.added > 0) {
+          console.log('[CostBasis] Added', result.added, 'entries from transaction history');
+        }
         if (result.fixed > 0) {
-          console.log('[CostBasis] Backfilled', result.fixed, 'entries');
+          console.log('[CostBasis] Fixed', result.fixed, 'entries');
         }
       });
     }
