@@ -1,0 +1,48 @@
+export const config = {
+  runtime: 'edge',
+};
+
+// This function only gets called for US users (via vercel.json rewrite condition)
+export default function handler() {
+  return new Response(
+    `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Region Restricted</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #0a0a0a;
+      color: #fff;
+    }
+    .container {
+      text-align: center;
+      padding: 2rem;
+    }
+    h1 {
+      font-size: 1.5rem;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Instinkt is not available in your region</h1>
+  </div>
+</body>
+</html>`,
+    {
+      status: 451,
+      headers: {
+        'Content-Type': 'text/html',
+      },
+    }
+  );
+}
