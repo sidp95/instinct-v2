@@ -2,10 +2,18 @@
   "buildCommand": "vite build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "rewrites": [
+  "redirects": [
     {
-      "source": "/((?!api/|_next/|assets/|favicon.ico|.*\\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2)).*)",
-      "destination": "/api/geo-block?path=/$1"
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "header",
+          "key": "x-vercel-ip-country",
+          "value": "AF|DZ|AO|AU|BY|BE|BO|BG|BF|CM|CA|CF|CI|CU|CD|ET|FR|HT|IR|IQ|IT|KE|LA|LB|LY|ML|MC|MZ|MM|NA|NI|NE|KP|CN|PL|RU|SG|SO|SS|SD|CH|SY|TW|TH|UA|AE|GB|VE|YE|ZW|US"
+        }
+      ],
+      "destination": "/blocked.html",
+      "permanent": false
     }
   ]
 }

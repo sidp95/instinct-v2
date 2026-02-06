@@ -104,11 +104,17 @@ export default async function handler(request) {
     );
   }
 
-  // For allowed countries, fetch the original content
+  // For allowed countries, fetch the original content with bypass header
   const url = new URL(request.url);
   const originalPath = url.searchParams.get('path') || '/';
   const originUrl = new URL(originalPath, url.origin);
 
-  // Pass through to origin
-  return fetch(originUrl);
+  // Add header to bypass the rewrite on the internal fetch
+  const response = await fetch(originUrl, {
+    headers: {
+      'x-geo-bypass': 'true',
+    },
+  });
+
+  return response;
 }
