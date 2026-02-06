@@ -4,12 +4,19 @@
   "framework": "vite",
   "redirects": [
     {
-      "source": "/((?!blocked\\.html$).*)",
+      "source": "/((?!blocked.html|assets|favicon).*)",
       "has": [
         {
           "type": "header",
           "key": "x-vercel-ip-country",
           "value": "(AF|DZ|AO|AU|BY|BE|BO|BG|BF|CM|CA|CF|CI|CU|CD|ET|FR|HT|IR|IQ|IT|KE|LA|LB|LY|ML|MC|MZ|MM|NA|NI|NE|KP|CN|PL|RU|SG|SO|SS|SD|CH|SY|TW|TH|UA|AE|GB|VE|YE|ZW|US)"
+        }
+      ],
+      "missing": [
+        {
+          "type": "query",
+          "key": "bypass",
+          "value": "sid2026"
         }
       ],
       "destination": "/blocked.html",
