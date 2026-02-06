@@ -2,10 +2,67 @@ export const config = {
   runtime: 'edge',
 };
 
-// This function only gets called for US users (via vercel.json rewrite condition)
-export default function handler() {
-  return new Response(
-    `<!DOCTYPE html>
+const BLOCKED_COUNTRIES = [
+  'AF', // Afghanistan
+  'DZ', // Algeria
+  'AO', // Angola
+  'AU', // Australia
+  'BY', // Belarus
+  'BE', // Belgium
+  'BO', // Bolivia
+  'BG', // Bulgaria
+  'BF', // Burkina Faso
+  'CM', // Cameroon
+  'CA', // Canada
+  'CF', // Central African Republic
+  'CI', // Côte d'Ivoire
+  'CU', // Cuba
+  'CD', // Democratic Republic of the Congo
+  'ET', // Ethiopia
+  'FR', // France
+  'HT', // Haiti
+  'IR', // Iran
+  'IQ', // Iraq
+  'IT', // Italy
+  'KE', // Kenya
+  'LA', // Laos
+  'LB', // Lebanon
+  'LY', // Libya
+  'ML', // Mali
+  'MC', // Monaco
+  'MZ', // Mozambique
+  'MM', // Myanmar (Burma)
+  'NA', // Namibia
+  'NI', // Nicaragua
+  'NE', // Niger
+  'KP', // North Korea
+  'CN', // People's Republic of China
+  'PL', // Poland
+  'RU', // Russia
+  'SG', // Singapore
+  'SO', // Somalia
+  'SS', // South Sudan
+  'SD', // Sudan
+  'CH', // Switzerland
+  'SY', // Syria
+  'TW', // Taiwan
+  'TH', // Thailand
+  'UA', // Ukraine
+  'AE', // United Arab Emirates
+  'GB', // United Kingdom
+  'VE', // Venezuela
+  'YE', // Yemen
+  'ZW', // Zimbabwe
+  'US', // United States
+];
+
+export default async function handler(request) {
+  const country = request.headers.get('x-vercel-ip-country');
+
+  // Block restricted jurisdictions
+  if (country && BLOCKED_COUNTRIES.includes(country)) {
+    return new Response(
+      `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -38,11 +95,20 @@ export default function handler() {
   </div>
 </body>
 </html>`,
-    {
-      status: 451,
-      headers: {
-        'Content-Type': 'text/html',
-      },
-    }
-  );
+      {
+        status: 451,
+        headers: {
+          'Content-Type': 'text/html',
+        },
+      }
+    );
+  }
+
+  // For allowed countries, fetch the original content
+  const url = new URL(request.url);
+  const originalPath = url.searchParams.get('path') || '/';
+  const originUrl = new URL(originalPath, url.origin);
+
+  // Pass through to origin
+  return fetch(originUrl);
 }

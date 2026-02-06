@@ -5,9 +5,6 @@
   "rewrites": [
     {
       "source": "/((?!api/|_next/|assets/|favicon.ico|.*\\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2)).*)",
-      "has": [
-        { "type": "header", "key": "x-vercel-ip-country", "value": "US" }
-      ],
       "destination": "/api/geo-block?path=/$1"
     }
   ]
